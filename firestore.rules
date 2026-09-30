@@ -1,0 +1,69 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Default deny all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Users Collection
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow create: if isOwner(userId) && request.resource.data.id == userId;
+      allow update: if isOwner(userId) && request.resource.data.id == userId;
+      allow delete: if isOwner(userId);
+    }
+
+    // Tasks Collection
+    match /tasks/{taskId} {
+      function isValidTask(data) {
+        return data.id is string &&
+               data.userId == request.auth.uid &&
+               data.title is string &&
+               data.title.size() > 0 &&
+               data.title.size() <= 200 &&
+               data.completed is bool &&
+               data.category in ['Personal', 'Work', 'Urgent', 'Health', 'Errands'] &&
+               data.priority in ['low', 'medium', 'high'];
+      }
+
+      allow get: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(taskId) && isValidTask(request.resource.data);
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid && isValidTask(request.resource.data);
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    // Call Schedules Collection
+    match /call_schedules/{scheduleId} {
+      function isValidSchedule(data) {
+        return data.id is string &&
+               data.userId == request.auth.uid &&
+               data.scheduledTime is string &&
+               data.scheduledTime.size() <= 10 &&
+               data.enabled is bool &&
+               data.callType in ['morning_brief', 'afternoon_check', 'evening_recap', 'urgent_reminder', 'custom_alarm'];
+      }
+
+      allow get: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(scheduleId) && isValidSchedule(request.resource.data);
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid && isValidSchedule(request.resource.data);
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+  }
+}

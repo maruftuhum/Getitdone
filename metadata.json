@@ -1,0 +1,6 @@
+{
+  "name": "Get It Done",
+  "description": "Intelligent mobile task manager and AI voice call assistant with Google Tasks interface, calendar, floating chat head, and simulated voice briefing calls.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

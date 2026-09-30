@@ -1,0 +1,149 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User preferences and settings for Get It Done app",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique user ID matching auth UID"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "User email address"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "User display name"
+        },
+        "morningBriefingTime": {
+          "type": "string",
+          "description": "Preferred time for morning briefing call in HH:mm format"
+        },
+        "autoCallEnabled": {
+          "type": "boolean",
+          "description": "Whether automated simulated briefing calls are enabled"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO timestamp of account creation"
+        }
+      },
+      "required": ["id", "email"]
+    },
+    "Task": {
+      "title": "Task",
+      "description": "A scheduled or pending to-do task",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique task ID"
+        },
+        "userId": {
+          "type": "string",
+          "description": "Owner user UID"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Title of the task"
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 1000,
+          "description": "Detailed notes or sub-steps"
+        },
+        "dueDate": {
+          "type": "string",
+          "description": "Due date in YYYY-MM-DD format"
+        },
+        "dueTime": {
+          "type": "string",
+          "description": "Optional due time in HH:mm format"
+        },
+        "location": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Physical or virtual location"
+        },
+        "category": {
+          "type": "string",
+          "enum": ["Personal", "Work", "Urgent", "Health", "Errands"],
+          "description": "Category or list name"
+        },
+        "priority": {
+          "type": "string",
+          "enum": ["low", "medium", "high"],
+          "description": "Priority level"
+        },
+        "completed": {
+          "type": "boolean",
+          "description": "Whether the task has been checked off"
+        },
+        "completedAt": {
+          "type": "string",
+          "description": "ISO timestamp when marked completed"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp created"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Timestamp last updated"
+        }
+      },
+      "required": ["id", "userId", "title", "completed", "category", "priority"]
+    },
+    "CallSchedule": {
+      "title": "CallSchedule",
+      "description": "Simulated AI phone call briefing schedule",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Schedule unique ID"
+        },
+        "userId": {
+          "type": "string",
+          "description": "Owner user UID"
+        },
+        "scheduledTime": {
+          "type": "string",
+          "description": "Briefing call time HH:mm"
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Active state of scheduled call"
+        },
+        "callType": {
+          "type": "string",
+          "enum": ["morning_brief", "evening_recap", "urgent_reminder"],
+          "description": "Type of AI briefing call"
+        },
+        "lastCallDate": {
+          "type": "string",
+          "description": "Date when last call was placed"
+        }
+      },
+      "required": ["id", "userId", "scheduledTime", "enabled", "callType"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile and configuration"
+    },
+    "/tasks/{taskId}": {
+      "schema": "Task",
+      "description": "Tasks created by users"
+    },
+    "/call_schedules/{scheduleId}": {
+      "schema": "CallSchedule",
+      "description": "User scheduled briefing calls"
+    }
+  }
+}
