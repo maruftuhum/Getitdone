@@ -1,17 +1,14 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import { defineConfig, PluginOption } from 'vite';
+import {defineConfig} from 'vite';
+import {VitePWA} from 'vite-plugin-pwa';
 
-export default defineConfig(async ({ command }) => {
-  const plugins: PluginOption[] = [
-    react(),
-    tailwindcss(),
-  ];
-
-  if (command === 'build') {
-    const { VitePWA } = await import('vite-plugin-pwa');
-    plugins.push(
+export default defineConfig(() => {
+  return {
+    plugins: [
+      react(),
+      tailwindcss(),
       VitePWA({
         registerType: 'autoUpdate',
         includeAssets: ['icon.svg', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png', 'pwa-maskable-512x512.png'],
@@ -84,69 +81,17 @@ export default defineConfig(async ({ command }) => {
         devOptions: {
           enabled: false,
         },
-      })
-    );
-  } else {
-    // In dev mode, provide the virtual:pwa-register module without loading workbox-build
-    plugins.push({
-      name: 'virtual-pwa-dev',
-      resolveId(id) {
-        if (id === 'virtual:pwa-register') return '\0virtual:pwa-register';
-      },
-      load(id) {
-        if (id === '\0virtual:pwa-register') {
-          return `export function registerSW() { return async () => {}; }`;
-        }
-      },
-    });
-  }
-
-  return {
-    plugins,
+      }),
+    ],
     resolve: {
       alias: {
         '@': path.resolve('.'),
       },
     },
-    optimizeDeps: {
-      include: [
-        'react',
-        'react-dom',
-        'lucide-react',
-        'motion',
-        'firebase/app',
-        'firebase/auth',
-        'firebase/firestore',
-      ],
-      exclude: ['@mlc-ai/web-llm'],
-    },
-    build: {
-      chunkSizeWarningLimit: 2500,
-      rollupOptions: {
-        output: {
-          manualChunks(id: string) {
-            if (id.includes('@mlc-ai/web-llm')) {
-              return 'vendor-webllm';
-            }
-            if (id.includes('firebase')) {
-              return 'vendor-firebase';
-            }
-            if (id.includes('motion')) {
-              return 'vendor-motion';
-            }
-            if (id.includes('lucide-react')) {
-              return 'vendor-icons';
-            }
-            if (id.includes('node_modules/react/') || id.includes('node_modules/react-dom/')) {
-              return 'vendor-react';
-            }
-          },
-        },
-      },
-    },
     server: {
       port: 3000,
       host: '0.0.0.0',
+      allowedHosts: true,
       hmr: false,
     },
   };

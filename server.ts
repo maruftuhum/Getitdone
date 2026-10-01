@@ -1,5 +1,4 @@
-import express from 'express';
-import type { Request, Response } from 'express';
+import express, { Request, Response } from 'express';
 import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
@@ -499,67 +498,17 @@ async function startServer() {
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
+        allowedHosts: true,
         hmr: false,
       },
       appType: 'spa',
     });
-
-    // Provide a silent client stub for @vite/client with full style and context helpers
-    app.get('/@vite/client', (_req, res) => {
-      res.type('application/javascript').send(`
-const sheetsMap = new Map();
-export function updateStyle(id, content) {
-  let style = sheetsMap.get(id);
-  if (!style) {
-    style = document.createElement('style');
-    style.setAttribute('type', 'text/css');
-    style.setAttribute('data-vite-dev-id', id);
-    style.textContent = content;
-    document.head.appendChild(style);
-  } else {
-    style.textContent = content;
-  }
-  sheetsMap.set(id, style);
-}
-
-export function removeStyle(id) {
-  const style = sheetsMap.get(id);
-  if (style && style.parentNode) {
-    style.parentNode.removeChild(style);
-    sheetsMap.delete(id);
-  }
-}
-
-export class ErrorOverlay extends (typeof HTMLElement !== 'undefined' ? HTMLElement : Object) {}
-if (typeof customElements !== 'undefined' && !customElements.get('vite-error-overlay')) {
-  customElements.define('vite-error-overlay', ErrorOverlay);
-}
-
-export function createHotContext() {
-  return {
-    accept: () => {},
-    prune: () => {},
-    dispose: () => {},
-    decline: () => {},
-    invalidate: () => {},
-    on: () => {},
-    send: () => {}
-  };
-}
-
-export const injectQuery = (url) => url;
-export default {};
-`);
-    });
-
     app.use(vite.middlewares);
     app.use('*', async (req, res, next) => {
       const url = req.originalUrl;
       try {
         let template = fs.readFileSync(path.resolve(__dirname, 'index.html'), 'utf-8');
         template = await vite.transformIndexHtml(url, template);
-        // Remove @vite/client script injection as HMR is disabled in AI Studio preview iframe
-        template = template.replace(/<script type="module" src="\/@vite\/client"><\/script>/g, '');
         res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
       } catch (e: any) {
         vite.ssrFixStacktrace(e);
