@@ -620,21 +620,23 @@ export default function App() {
       />
 
       {/* Full Simulated Phone Call Modal */}
-      <AICallModal
-        callState={callState}
-        onAnswerCall={handleAnswerCall}
-        onDeclineCall={handleDeclineCall}
-        onEndCall={handleEndCall}
-        tasks={tasks}
-        userName={user?.displayName || 'Friend'}
-        onCompleteTask={handleCompleteTaskFromCall}
-        onAddTask={(title, dueDate, dueTime, priority, category, location) =>
-          handleAddTask(title, dueDate, dueTime, priority, category, location)
-        }
-        onUpdateTask={handleUpdateTask}
-        onDeleteTask={handleDeleteTask}
-        voiceName={voiceName}
-      />
+      {callState !== 'idle' && (
+        <AICallModal
+          callState={callState}
+          onAnswerCall={handleAnswerCall}
+          onDeclineCall={handleDeclineCall}
+          onEndCall={handleEndCall}
+          tasks={tasks}
+          userName={user?.displayName || 'Friend'}
+          onCompleteTask={handleCompleteTaskFromCall}
+          onAddTask={(title, dueDate, dueTime, priority, category, location) =>
+            handleAddTask(title, dueDate, dueTime, priority, category, location)
+          }
+          onUpdateTask={handleUpdateTask}
+          onDeleteTask={handleDeleteTask}
+          voiceName={voiceName}
+        />
+      )}
 
       {/* Automated Messages Drawer */}
       <AutomatedMessagesDrawer

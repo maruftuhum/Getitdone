@@ -432,6 +432,10 @@ export const AICallModal: React.FC<AICallModalProps> = ({
 
   const pendingCount = tasks.filter((t) => !t.completed).length;
 
+  if (callState === 'idle') {
+    return null;
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-xl animate-fade-in p-4">
       {/* INCOMING RINGING SCREEN */}
