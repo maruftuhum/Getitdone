@@ -2,17 +2,20 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Send, Mic, MicOff, Sparkles, User, Check, Plus, Calendar, Phone } from 'lucide-react';
 import { ChatMessage, Task } from '../types';
 
+import { askAssistant } from '../services/assistantService';
+import type { ActionResult } from '../shared/taskActions';
+
 interface ChatAssistantViewProps {
   tasks: Task[];
-  onAddTask: (title: string, dueDate: string, dueTime?: string | null, priority?: 'low' | 'medium' | 'high', category?: any, location?: string | null) => void;
-  onCompleteTask: (taskId: string) => void;
+  onAction: (input: unknown) => ActionResult;
+  hybridMode: boolean;
   onTriggerCall: () => void;
 }
 
 export const ChatAssistantView: React.FC<ChatAssistantViewProps> = ({
   tasks,
-  onAddTask,
-  onCompleteTask,
+  onAction,
+  hybridMode,
   onTriggerCall,
 }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([
@@ -28,6 +31,8 @@ export const ChatAssistantView: React.FC<ChatAssistantViewProps> = ({
   const [isMicListening, setIsMicListening] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
+  const controllerRef = useRef<AbortController | null>(null);
+  useEffect(() => () => { controllerRef.current?.abort(); recognitionRef.current?.abort(); }, []);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -53,52 +58,18 @@ export const ChatAssistantView: React.FC<ChatAssistantViewProps> = ({
     setIsLoading(true);
 
     try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: [...messages, userMsg].map((m) => ({
-            role: m.role,
-            content: m.content,
-          })),
-          tasksContext: tasks,
-        }),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        const assistantMsg: ChatMessage = {
-          id: String(Date.now() + 1),
-          role: 'assistant',
-          content: data.reply || "I've checked your schedule.",
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          action: data.action,
-        };
-
-        // If an action was returned by Gemini, execute it automatically!
-        if (data.action) {
-          if (data.action.action === 'CREATE_TASK' && data.action.task) {
-            const t = data.action.task;
-            onAddTask(
-              t.title || 'New Task',
-              t.dueDate || new Date().toISOString().split('T')[0],
-              t.dueTime || null,
-              t.priority || 'medium',
-              t.category || 'Personal',
-              t.location || null
-            );
-          } else if (data.action.action === 'COMPLETE_TASK') {
-            const pending = tasks.filter((t) => !t.completed);
-            if (pending.length > 0) {
-              onCompleteTask(pending[0].id);
-            }
-          }
-        }
-
-        setMessages((prev) => [...prev, assistantMsg]);
-      } else {
-        throw new Error('Failed to generate response');
-      }
+      const controller = new AbortController();
+      controllerRef.current = controller;
+      const data = await askAssistant([...messages, userMsg].map(m => ({ role: m.role, content: m.content })), tasks, hybridMode, undefined, controller.signal);
+      if (controller.signal.aborted) return;
+      const result = data.action ? onAction(data.action) : null;
+      const assistantMsg: ChatMessage = {
+        id: crypto.randomUUID(), role: 'assistant',
+        content: result && !result.ok ? result.message : data.reply,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        action: result?.ok ? data.action : null,
+      };
+      setMessages(prev => [...prev, assistantMsg]);
     } catch (err: any) {
       console.error(err);
       setMessages((prev) => [
@@ -174,7 +145,7 @@ export const ChatAssistantView: React.FC<ChatAssistantViewProps> = ({
       <div className="flex items-center justify-between bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900/40 rounded-2xl px-4 py-2.5 mb-3 text-xs">
         <div className="flex items-center gap-2 text-indigo-700 dark:text-indigo-300">
           <Sparkles className="w-4 h-4" />
-          <span className="font-medium">Hybrid Gemini 3.1 Flash-Lite Engine</span>
+          <span className="font-medium">{hybridMode ? 'Cloud assistant with offline fallback' : 'On-device assistant'}</span>
         </div>
         <button
           onClick={onTriggerCall}

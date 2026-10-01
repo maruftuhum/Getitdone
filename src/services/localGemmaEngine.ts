@@ -1,13 +1,12 @@
 import { Task } from '../types';
-import { parseTaskLocally } from './localNlpParser';
+import { localTaskCommand } from './localTaskCommands';
+import { localDate } from '../shared/dates';
+import type { TaskAction } from '../shared/taskActions';
 import type { MLCEngine, InitProgressReport } from '@mlc-ai/web-llm';
 
 export interface LocalGemmaResult {
   reply: string;
-  action?: {
-    action: string;
-    task?: Partial<Task>;
-  } | null;
+  action?: TaskAction | null;
   isNativeOnDevice: boolean;
   engineUsed: string;
 }
@@ -163,10 +162,13 @@ class LocalGemmaEngine {
 
   // Generate response: Priority: Real in-browser WebLLM model -> Fallback: Bundled instant offline engine
   public async generateResponse(userInput: string, tasks: Task[]): Promise<LocalGemmaResult> {
-    const today = new Date().toISOString().split('T')[0];
+    const today = localDate();
     const pendingTasks = tasks.filter((t) => !t.completed);
     const todayTasks = pendingTasks.filter((t) => t.dueDate === today);
     const urgentTasks = pendingTasks.filter((t) => t.priority === 'high');
+
+    const command = localTaskCommand(userInput, tasks);
+    if (command) return { ...command, isNativeOnDevice: true, engineUsed: 'Local task parser' };
 
     // 1. If in-browser downloaded model is active, run real GPU inference!
     if (this.webLlmEngine) {
@@ -189,27 +191,8 @@ Instructions: Keep answers concise, helpful, and directly actionable for their s
 
         const replyText = response.choices[0]?.message?.content || '';
 
-        // If user wants to add task, also trigger local parsing action
-        let action = null;
-        const lower = userInput.toLowerCase();
-        if (lower.startsWith('add ') || lower.startsWith('create ') || lower.startsWith('remind me')) {
-          const parsed = parseTaskLocally(userInput);
-          action = {
-            action: 'CREATE_TASK',
-            task: {
-              title: parsed.title,
-              dueDate: parsed.dueDate,
-              dueTime: parsed.dueTime,
-              priority: parsed.priority,
-              category: parsed.category,
-              location: parsed.location,
-            },
-          };
-        }
-
         return {
           reply: replyText,
-          action,
           isNativeOnDevice: true,
           engineUsed: `In-Browser WebGPU (${this.selectedModelId})`,
         };
@@ -221,37 +204,11 @@ Instructions: Keep answers concise, helpful, and directly actionable for their s
     // 2. Bundled High-Performance On-Device Offline Engine (Zero download required)
     const input = userInput.trim().toLowerCase();
 
-    // A. Detect Intent to add task
-    if (
-      input.startsWith('add ') ||
-      input.startsWith('create ') ||
-      input.startsWith('schedule ') ||
-      input.startsWith('remind me to ') ||
-      input.includes('tomorrow') ||
-      input.includes('at ') ||
-      input.includes('urgent')
-    ) {
-      const parsed = parseTaskLocally(userInput);
-      const timeNote = parsed.dueTime ? ` at ${parsed.dueTime}` : '';
-      const reply = `[Local Assistant] I've scheduled this task for you: "${parsed.title}" on ${parsed.dueDate}${timeNote} (${parsed.priority} priority).`;
-      return {
-        reply,
-        action: {
-          action: 'CREATE_TASK',
-          task: {
-            title: parsed.title,
-            dueDate: parsed.dueDate,
-            dueTime: parsed.dueTime,
-            priority: parsed.priority,
-            category: parsed.category,
-            location: parsed.location,
-          },
-        },
-        isNativeOnDevice: true,
-        engineUsed: 'Bundled Local Engine (100% Offline)',
-      };
+    if (input.includes('tomorrow')) {
+      const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
+      const list = pendingTasks.filter(t => t.dueDate === localDate(tomorrow));
+      return { reply: list.length ? list.map(t => t.title + (t.dueTime ? ' at ' + t.dueTime : '')).join('\n') : 'No tasks are due tomorrow.', isNativeOnDevice: true, engineUsed: 'Local assistant' };
     }
-
     // B. Query: What's due today?
     if (input.includes('today') || input.includes('what is due') || input.includes('schedule')) {
       if (todayTasks.length === 0) {
@@ -312,7 +269,7 @@ Instructions: Keep answers concise, helpful, and directly actionable for their s
 
   // Generate Proactive Work Update Message
   public generateProactiveCheckin(tasks: Task[]): { title: string; body: string; type: 'reminder' | 'urgent' } {
-    const today = new Date().toISOString().split('T')[0];
+    const today = localDate();
     const pending = tasks.filter((t) => !t.completed);
     const todayTasks = pending.filter((t) => t.dueDate === today);
     const urgent = todayTasks.filter((t) => t.priority === 'high');

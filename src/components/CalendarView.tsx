@@ -1,3 +1,4 @@
+import { localDate } from '../shared/dates';
 import React, { useState } from 'react';
 import { 
   ChevronLeft, 
@@ -25,7 +26,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
 }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDateIso, setSelectedDateIso] = useState(
-    new Date().toISOString().split('T')[0]
+    localDate()
   );
   const [newScheduleTitle, setNewScheduleTitle] = useState('');
   const [newScheduleTime, setNewScheduleTime] = useState('09:00');
@@ -53,7 +54,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   const handleToday = () => {
     const now = new Date();
     setCurrentDate(now);
-    setSelectedDateIso(now.toISOString().split('T')[0]);
+    setSelectedDateIso(localDate(now));
   };
 
   const handleDateClick = (day: number) => {
@@ -136,7 +137,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
             const d = String(dayNum).padStart(2, '0');
             const dateStr = `${year}-${m}-${d}`;
             const isSelected = selectedDateIso === dateStr;
-            const isToday = new Date().toISOString().split('T')[0] === dateStr;
+            const isToday = localDate() === dateStr;
 
             // Tasks due on this day
             const dayTasks = tasks.filter((t) => t.dueDate === dateStr);

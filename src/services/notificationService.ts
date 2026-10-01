@@ -39,7 +39,7 @@ class NotificationService {
     }
   }
 
-  public sendNotification(title: string, body: string, onClick?: () => void): boolean {
+  public sendNotification(title: string, body: string, onClick?: () => void, tag = `alert-${Date.now()}`): boolean {
     // 1. Play alert sound chime
     this.playNotificationBeep();
 
@@ -54,12 +54,16 @@ class NotificationService {
 
     // 3. System Notification
     if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+      if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+        void navigator.serviceWorker.getRegistration().then(reg => reg?.showNotification(title, { body, icon: '/pwa-192x192.png', badge: '/icon.svg', tag, data: { url: '/' } })).catch(() => {});
+        return true;
+      }
       try {
         const notif = new Notification(title, {
           body,
           icon: '/pwa-192x192.png',
           badge: '/icon.svg',
-          tag: 'get-it-done-alert',
+          tag,
           silent: false,
         });
 
@@ -100,6 +104,7 @@ class NotificationService {
 
       osc.start(ctx.currentTime);
       osc.stop(ctx.currentTime + 0.4);
+      osc.onended = () => { void ctx.close(); };
     } catch (e) {
       // ignore
     }

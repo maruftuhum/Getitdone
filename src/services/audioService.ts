@@ -1,3 +1,5 @@
+import { apiFetch } from './apiClient';
+import { audioBlob } from '../shared/audio';
 import { hapticService } from './hapticService';
 
 class AudioService {
@@ -14,6 +16,7 @@ class AudioService {
   private preloadedAudio: HTMLAudioElement | null = null;
   private preloadedBlobUrl: string | null = null;
   private preloadedText: string = '';
+  private speechGeneration = 0;
 
   private initContext() {
     if (!this.ctx) {
@@ -142,7 +145,7 @@ class AudioService {
       for (let i = 0; i < binary.length; i++) {
         bytes[i] = binary.charCodeAt(i);
       }
-      const blob = new Blob([bytes], { type: mimeType || 'audio/mp3' });
+      const blob = audioBlob(bytes, mimeType);
       this.preloadedBlobUrl = URL.createObjectURL(blob);
       const audio = new Audio(this.preloadedBlobUrl);
       audio.preload = 'auto';
@@ -156,24 +159,22 @@ class AudioService {
 
   // Preload audio by requesting TTS API in advance
   public async preloadAudio(text: string, voiceName = 'Puck'): Promise<boolean> {
+    const generation = this.speechGeneration;
     if (!text || !text.trim()) return false;
     if (this.preloadedAudio && this.preloadedText === text) {
       return true;
     }
 
-    if (voiceName === 'Device-Local') {
+    if (voiceName === 'Device-Local' || !navigator.onLine || localStorage.getItem('getitdone_hybrid_mode') === 'false') {
       return true; // Local speech synthesis is always available on-device
     }
 
     try {
-      const res = await fetch('/api/tts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, voice: voiceName }),
-      });
+      const res = await apiFetch('/api/tts', { text, voice: voiceName });
 
       if (res.ok) {
         const data = await res.json();
+        if (generation !== this.speechGeneration) return false;
         if (data.audioBase64) {
           this.preloadAudioFromBase64(data.audioBase64, data.mimeType || 'audio/mp3', text);
           return true;
@@ -208,6 +209,7 @@ class AudioService {
     onEnd?: () => void
   ): Promise<void> {
     this.stopSpeaking();
+    const generation = this.speechGeneration;
     this.initContext();
 
     if (this.preloadedAudio && (!text || this.preloadedText === text || !this.preloadedText)) {
@@ -229,7 +231,7 @@ class AudioService {
       audio.onerror = () => {
         if (currentUrl) URL.revokeObjectURL(currentUrl);
         this.currentAudio = null;
-        this.fallbackSpeechSynthesis(text, onStart, onEnd);
+        if (generation === this.speechGeneration) this.fallbackSpeechSynthesis(text, onStart, onEnd);
       };
 
       try {
@@ -252,30 +254,30 @@ class AudioService {
     onEnd?: () => void
   ): Promise<void> {
     this.stopSpeaking();
+    const generation = this.speechGeneration;
     this.initContext();
 
-    if (voiceName === 'Device-Local') {
+    if (voiceName === 'Device-Local' || !navigator.onLine || localStorage.getItem('getitdone_hybrid_mode') === 'false') {
       this.fallbackSpeechSynthesis(text, onStart, onEnd);
       return;
     }
 
     try {
       // 1. Attempt Gemini TTS from server
-      const res = await fetch('/api/tts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, voice: voiceName }),
-      });
+      const res = await apiFetch('/api/tts', { text, voice: voiceName });
+
+      if (generation !== this.speechGeneration) return;
 
       if (res.ok) {
         const data = await res.json();
         if (data.audioBase64) {
+          if (generation !== this.speechGeneration) return;
           const binary = atob(data.audioBase64);
           const bytes = new Uint8Array(binary.length);
           for (let i = 0; i < binary.length; i++) {
             bytes[i] = binary.charCodeAt(i);
           }
-          const blob = new Blob([bytes], { type: data.mimeType || 'audio/mp3' });
+          const blob = audioBlob(bytes, data.mimeType);
           const url = URL.createObjectURL(blob);
           const audio = new Audio(url);
           this.currentAudio = audio;
@@ -303,6 +305,7 @@ class AudioService {
     }
 
     // 2. Fallback to Web Speech API
+    if (generation !== this.speechGeneration) return;
     this.fallbackSpeechSynthesis(text, onStart, onEnd);
   }
 
@@ -355,6 +358,7 @@ class AudioService {
   }
 
   public stopSpeaking(): void {
+    this.speechGeneration++;
     if (this.currentAudio) {
       this.currentAudio.pause();
       this.currentAudio = null;

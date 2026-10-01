@@ -25,6 +25,10 @@ import { audioService } from '../services/audioService';
 import { hapticService } from '../services/hapticService';
 
 interface CallScheduleSettingsProps {
+  backgroundStatus: string;
+  backgroundEnabled: boolean;
+  onEnableBackground: () => Promise<void>;
+  onDisableBackground: () => Promise<void>;
   user: FirebaseUser | null;
   onSignIn: () => void;
   onSignOut: () => void;
@@ -54,6 +58,10 @@ export const CallScheduleSettings: React.FC<CallScheduleSettingsProps> = ({
   hybridMode,
   onToggleHybridMode,
   onOpenGemmaModal,
+  backgroundStatus,
+  backgroundEnabled,
+  onEnableBackground,
+  onDisableBackground,
 }) => {
   const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
   const [showIosGuide, setShowIosGuide] = useState(false);
@@ -133,6 +141,12 @@ export const CallScheduleSettings: React.FC<CallScheduleSettingsProps> = ({
 
   return (
     <div className="w-full max-w-2xl mx-auto px-4 py-4 pb-28 space-y-5">
+      <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-5 space-y-3">
+        <h3 className="text-sm font-bold">Background alerts</h3>
+        <p role="status" className="text-xs text-slate-500">{backgroundStatus}</p>
+        <p className="text-xs text-slate-500">Receive due-task and briefing notifications while the app is closed. Open a briefing notification to start the in-app call. Delivery depends on browser permissions, network access, and a running reminder server.</p>
+        <button onClick={backgroundEnabled ? onDisableBackground : onEnableBackground} className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs">{backgroundEnabled ? 'Disable background alerts' : 'Enable background alerts'}</button>
+      </div>
       {/* 1. Android APK & App Installation Card */}
       <div className="bg-gradient-to-br from-indigo-900 via-indigo-950 to-slate-900 text-white rounded-3xl p-5 shadow-lg space-y-4">
         <div className="flex items-center justify-between">
@@ -191,7 +205,7 @@ export const CallScheduleSettings: React.FC<CallScheduleSettingsProps> = ({
               Android WebAPK Technology
             </h4>
             <p className="text-[11px] text-indigo-200 leading-relaxed">
-              When you tap <strong>Install App</strong> in Google Chrome on Android, Chrome's minting service compiles this app into a true <strong>WebAPK</strong> (.apk) registered with Android OS. It appears in your Android App Drawer, works offline via service worker, supports system alarms, and runs in a full-screen window without browser address bars.
+              Installing from Chrome adds the app to your Android app drawer and gives it a full-screen window. Cached task management works offline. Enable background alerts separately to receive notifications while the app is closed.
             </p>
           </div>
         )}
@@ -283,7 +297,7 @@ export const CallScheduleSettings: React.FC<CallScheduleSettingsProps> = ({
                 Scheduled AI Phone Calls
               </h3>
               <p className="text-xs text-slate-500">
-                AI rings your phone automatically at each scheduled time
+                In-app calls with optional background notifications
               </p>
             </div>
           </div>
@@ -408,7 +422,7 @@ export const CallScheduleSettings: React.FC<CallScheduleSettingsProps> = ({
                       </span>
                     </div>
                     <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                      {v.isOffline ? 'Runs on phone DSP/CPU' : 'Gemini 3.8 Flash TTS'}
+                      {v.isOffline ? 'Uses installed browser voices' : 'Cloud speech with device fallback'}
                     </span>
                   </div>
 
@@ -498,10 +512,10 @@ export const CallScheduleSettings: React.FC<CallScheduleSettingsProps> = ({
             </div>
             <div>
               <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                100% Offline Mode & Hybrid Parser
+                Use cloud AI with offline fallback
               </h3>
               <p className="text-xs text-slate-500">
-                Tasks, reminders, & speech work completely without internet
+                Switch off to keep assistant inference and speech on this device
               </p>
             </div>
           </div>
@@ -524,10 +538,10 @@ export const CallScheduleSettings: React.FC<CallScheduleSettingsProps> = ({
         <div className="pt-2 border-t border-slate-100 dark:border-slate-800/60 flex items-center justify-between">
           <div>
             <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 block">
-              On-Device Gemma 4B Model
+              Optional on-device language model
             </span>
             <span className="text-[11px] text-slate-500">
-              Enable Chrome Android Built-in AI or local Ollama server
+              Download a supported model to run in your browser with WebGPU
             </span>
           </div>
           <button

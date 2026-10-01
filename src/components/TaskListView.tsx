@@ -1,3 +1,4 @@
+import { localDate } from '../shared/dates';
 import React, { useState } from 'react';
 import { 
   Check, 
@@ -50,7 +51,7 @@ export const TaskListView: React.FC<TaskListViewProps> = ({
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [expandedSubtasks, setExpandedSubtasks] = useState<Record<string, boolean>>({});
 
-  const todayIso = new Date().toISOString().split('T')[0];
+  const todayIso = localDate();
 
   // Filter Tasks
   const filteredTasks = tasks.filter((task) => {

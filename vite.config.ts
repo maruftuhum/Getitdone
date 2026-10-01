@@ -45,6 +45,7 @@ export default defineConfig(() => {
           ],
         },
         workbox: {
+          importScripts: ['/push-sw.js'],
           maximumFileSizeToCacheInBytes: 15 * 1024 * 1024,
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
           runtimeCaching: [
@@ -91,8 +92,7 @@ export default defineConfig(() => {
     server: {
       port: 3000,
       host: '0.0.0.0',
-      allowedHosts: true as const,
-      hmr: false,
+      allowedHosts: process.env.ALLOWED_HOSTS?.split(',').map(value => value.trim()).filter(Boolean) || [],
     },
   };
 });

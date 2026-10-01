@@ -1,3 +1,5 @@
+import { localDate } from '../shared/dates';
+import { apiFetch } from './apiClient';
 import { Task } from '../types';
 import { audioService } from './audioService';
 
@@ -10,10 +12,13 @@ export interface PreparedCallData {
 class VoiceCallService {
   private currentPreparation: Promise<PreparedCallData> | null = null;
   private cachedData: PreparedCallData | null = null;
+  private fingerprint = '';
+  private generation = 0;
+  private controller: AbortController | null = null;
 
   // Build an immediate instant local fallback script so there is 0ms delay under any condition
   public getInstantFallbackScript(tasks: Task[], userName = 'there'): string {
-    const todayIso = new Date().toISOString().split('T')[0];
+    const todayIso = localDate();
     const pending = tasks.filter((t) => !t.completed);
     const todayTasks = pending.filter((t) => t.dueDate === todayIso);
     const urgentTasks = pending.filter((t) => t.priority === 'high');
@@ -37,12 +42,14 @@ class VoiceCallService {
     voiceName = 'Puck',
     callType = 'morning_brief'
   ): Promise<PreparedCallData> {
-    if (this.currentPreparation) {
-      return this.currentPreparation;
-    }
+    const fingerprint = JSON.stringify([tasks, userName, voiceName, callType]);
+    if (this.currentPreparation && this.fingerprint === fingerprint) return this.currentPreparation;
+    this.clear();
+    this.fingerprint = fingerprint;
+    const generation = this.generation;
 
     const instantFallback = this.getInstantFallbackScript(tasks, userName);
-    const todayIso = new Date().toISOString().split('T')[0];
+    const todayIso = localDate();
     const pending = tasks.filter((t) => !t.completed);
     const todayTasks = pending.filter((t) => t.dueDate === todayIso);
 
@@ -51,21 +58,14 @@ class VoiceCallService {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 2600);
 
-        const res = await fetch('/api/prepare-call', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            tasks,
-            userName,
-            voice: voiceName,
-            callType,
-          }),
-          signal: controller.signal,
-        });
+        this.controller = controller;
+        if (voiceName === 'Device-Local' || !navigator.onLine) throw new Error('Using device speech');
+        const res = await apiFetch('/api/prepare-call', { tasks, userName, voice: voiceName, callType }, controller.signal);
         clearTimeout(timeoutId);
 
         if (res.ok) {
           const data = await res.json();
+          if (generation !== this.generation) return { script: instantFallback, isAudioReady: false, taskCount: todayTasks.length };
           const finalScript = data.script?.trim() || instantFallback;
 
           if (data.audioBase64) {
@@ -91,6 +91,7 @@ class VoiceCallService {
         console.info('Pre-loading via prepare-call timed out or offline, using instant local script:', err);
       }
 
+      if (generation !== this.generation) return { script: instantFallback, isAudioReady: false, taskCount: todayTasks.length };
       // Offline or network timeout fallback:
       audioService.preloadAudio(instantFallback, voiceName);
       this.cachedData = {
@@ -109,6 +110,9 @@ class VoiceCallService {
   }
 
   public clear(): void {
+    this.generation++;
+    this.controller?.abort();
+    this.controller = null;
     this.currentPreparation = null;
     this.cachedData = null;
     audioService.clearPreload();

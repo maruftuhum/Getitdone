@@ -58,10 +58,7 @@ export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   timestamp: string;
-  action?: {
-    action: string;
-    task?: Partial<Task>;
-  } | null;
+  action?: import('../shared/taskActions').TaskAction | null;
 }
 
 export type ActiveCallState = 'idle' | 'ringing' | 'connected' | 'ended';

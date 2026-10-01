@@ -13,29 +13,23 @@ import {
   Bot
 } from 'lucide-react';
 import { Task } from '../types';
-import { localGemmaEngine } from '../services/localGemmaEngine';
+import { askAssistant } from '../services/assistantService';
+import type { ActionResult } from '../shared/taskActions';
 
 interface ChatHeadBubbleProps {
   tasks: Task[];
-  onAddTask: (
-    title: string, 
-    dueDate: string, 
-    dueTime?: string | null, 
-    priority?: 'low' | 'medium' | 'high', 
-    category?: any, 
-    location?: string | null
-  ) => void;
+  onAction: (input: unknown) => ActionResult;
   onTriggerCall: () => void;
   latestWorkUpdate?: string;
-  useLocalGemma?: boolean;
+  hybridMode: boolean;
 }
 
 export const ChatHeadBubble: React.FC<ChatHeadBubbleProps> = ({
   tasks,
-  onAddTask,
+  onAction,
   onTriggerCall,
   latestWorkUpdate,
-  useLocalGemma = true,
+  hybridMode,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [input, setInput] = useState('');
@@ -53,12 +47,14 @@ export const ChatHeadBubble: React.FC<ChatHeadBubbleProps> = ({
   const [messages, setMessages] = useState<Array<{ sender: 'user' | 'ai'; text: string; model?: string }>>([
     {
       sender: 'ai',
-      text: "Hey! I'm your Get It Done assistant powered by Local Gemma 4B. What are we working on next?",
-      model: 'Gemma 4B',
+      text: "Hey! I'm your Get It Done assistant powered by Local Local Assistant. What are we working on next?",
+      model: 'Local Assistant',
     },
   ]);
   const [isGenerating, setIsGenerating] = useState(false);
   const recognitionRef = useRef<any>(null);
+  const controllerRef = useRef<AbortController | null>(null);
+  useEffect(() => () => { controllerRef.current?.abort(); recognitionRef.current?.abort(); }, []);
 
   const pendingCount = tasks.filter((t) => !t.completed).length;
 
@@ -67,7 +63,7 @@ export const ChatHeadBubble: React.FC<ChatHeadBubbleProps> = ({
     if (latestWorkUpdate) {
       setMessages((prev) => [
         ...prev,
-        { sender: 'ai', text: `[Work Update] ${latestWorkUpdate}`, model: 'Gemma 4B Assistant' },
+        { sender: 'ai', text: `[Work Update] ${latestWorkUpdate}`, model: 'Task Assistant' },
       ]);
     }
   }, [latestWorkUpdate]);
@@ -161,7 +157,7 @@ export const ChatHeadBubble: React.FC<ChatHeadBubbleProps> = ({
             </p>
             <div style="margin-top: 20px; padding: 12px; background: #1e293b; border-radius: 12px;">
               <strong style="font-size: 12px; display: block; margin-bottom: 6px;">Pending Tasks (${pendingCount}):</strong>
-              ${tasks.filter(t => !t.completed).slice(0, 4).map(t => `<div style="font-size: 11px; margin-bottom: 4px;">• ${t.title}</div>`).join('')}
+              ${tasks.filter(t => !t.completed).slice(0, 4).map(t => `<div style="font-size: 11px; margin-bottom: 4px;">• ${t.title.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!))}</div>`).join('')}
             </div>
           </div>
         `;
@@ -194,7 +190,7 @@ export const ChatHeadBubble: React.FC<ChatHeadBubbleProps> = ({
     }
   };
 
-  // Submit chat query using Local Gemma 4B
+  // Submit chat query using Local Local Assistant
   const handleSend = async () => {
     if (!input.trim() || isGenerating) return;
     const userText = input.trim();
@@ -203,30 +199,17 @@ export const ChatHeadBubble: React.FC<ChatHeadBubbleProps> = ({
 
     setMessages((prev) => [...prev, { sender: 'user', text: userText }]);
 
-    // Execute through Local Gemma 4B
-    const result = await localGemmaEngine.generateResponse(userText, tasks);
-
-    if (result.action?.action === 'CREATE_TASK' && result.action.task) {
-      const t = result.action.task;
-      onAddTask(
-        t.title || 'New Task',
-        t.dueDate || new Date().toISOString().split('T')[0],
-        t.dueTime,
-        t.priority || 'medium',
-        t.category || 'Personal',
-        t.location
-      );
-    }
-
-    setMessages((prev) => [
-      ...prev,
-      {
-        sender: 'ai',
-        text: result.reply,
-        model: result.isNativeOnDevice ? 'Gemma (Chrome On-Device)' : 'Local Gemma 4B Engine',
-      },
-    ]);
-    setIsGenerating(false);
+    try {
+      const history = messages.map(m => ({ role: m.sender === 'user' ? 'user' as const : 'assistant' as const, content: m.text }));
+      const controller = new AbortController();
+      controllerRef.current = controller;
+      const result = await askAssistant([...history, { role: 'user', content: userText }], tasks, hybridMode, undefined, controller.signal);
+      if (controller.signal.aborted) return;
+      const action = result.action ? onAction(result.action) : null;
+      setMessages(prev => [...prev, { sender: 'ai', text: action && !action.ok ? action.message : result.reply, model: result.engineUsed }]);
+    } catch {
+      setMessages(prev => [...prev, { sender: 'ai', text: 'Please try that instruction again.' }]);
+    } finally { setIsGenerating(false); }
   };
 
   const toggleMic = () => {
@@ -313,7 +296,7 @@ export const ChatHeadBubble: React.FC<ChatHeadBubbleProps> = ({
             <Bot className="w-7 h-7 text-white fill-white/20" />
 
             {/* Local LLM indicator dot */}
-            <span className="absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white dark:border-slate-900" title="Gemma 4B Local Model Active" />
+            <span className="absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white dark:border-slate-900" title="Local Assistant Local Model Active" />
 
             {/* Pending Tasks Badge */}
             {pendingCount > 0 && (
@@ -354,9 +337,9 @@ export const ChatHeadBubble: React.FC<ChatHeadBubbleProps> = ({
               </div>
               <div>
                 <div className="flex items-center gap-1.5">
-                  <h4 className="text-xs font-bold leading-none">Gemma 4B Assistant</h4>
+                  <h4 className="text-xs font-bold leading-none">Task Assistant</h4>
                   <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-emerald-500/30 text-emerald-200 border border-emerald-400/30 font-mono">
-                    Local LLM
+                    {hybridMode ? 'Hybrid' : 'Local'}
                   </span>
                 </div>
                 <span className="text-[10px] text-indigo-100 opacity-90 block mt-0.5">
@@ -420,7 +403,7 @@ export const ChatHeadBubble: React.FC<ChatHeadBubbleProps> = ({
             {isGenerating && (
               <div className="flex items-center gap-1.5 text-xs text-indigo-400 p-2">
                 <Cpu className="w-3.5 h-3.5 animate-spin" />
-                <span>Gemma 4B local reasoning...</span>
+                <span>Local Assistant local reasoning...</span>
               </div>
             )}
           </div>

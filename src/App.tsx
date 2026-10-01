@@ -1,20 +1,15 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
-import { 
-  auth, 
-  signInWithGoogle, 
-  logOut, 
-  subscribeToUserTasks, 
-  saveTaskToFirestore, 
-  updateTaskInFirestore, 
-  deleteTaskFromFirestore
-} from './services/firebase';
+import { useEffect, useState } from 'react';
+import { signInWithGoogle, logOut } from './services/firebase';
 import { localGemmaEngine } from './services/localGemmaEngine';
-import { Task, ActiveCallState, TaskCategory, TaskPriority, ScheduledCallAlarm, AutomatedMessage } from './types';
-import { audioService } from './services/audioService';
-import { voiceCallService } from './services/voiceCallService';
 import { notificationService } from './services/notificationService';
 import { hapticService } from './services/hapticService';
+import { useTasks } from './hooks/useTasks';
+import { useScopedState } from './hooks/useScopedState';
+import { useReminders } from './hooks/useReminders';
+import { useVoiceCall } from './hooks/useVoiceCall';
+import { useBackgroundReminders } from './hooks/useBackgroundReminders';
+import { executeTaskAction, taskFields } from './shared/taskActions';
+import { Task, TaskCategory, TaskPriority, ScheduledCallAlarm, AutomatedMessage } from './types';
 import { TopBar } from './components/TopBar';
 import { BottomNav } from './components/BottomNav';
 import { TaskListView } from './components/TaskListView';
@@ -27,74 +22,6 @@ import { AutomatedMessagesDrawer } from './components/AutomatedMessagesDrawer';
 import { LocalGemmaModal } from './components/LocalGemmaModal';
 import { Phone, Sparkles, CheckCircle2, Clock, Calendar as CalendarIcon, Bell } from 'lucide-react';
 
-const getInitialTasks = (): Task[] => {
-  const today = new Date().toISOString().split('T')[0];
-  const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0];
-
-  return [
-    {
-      id: 'task-1',
-      userId: 'local-user',
-      title: 'Review quarterly product milestones',
-      description: 'Check team backlog and confirm deliverable deadlines.',
-      dueDate: today,
-      dueTime: '10:00',
-      location: 'Conference Room B',
-      category: 'Work',
-      priority: 'high',
-      completed: false,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      subtasks: [
-        { id: 'sub-1', title: 'Prepare slide deck', completed: true },
-        { id: 'sub-2', title: 'Confirm budget alignment', completed: false },
-      ],
-    },
-    {
-      id: 'task-2',
-      userId: 'local-user',
-      title: 'Pick up groceries at Green Supermarket',
-      description: 'Almond milk, whole wheat bread, fresh apples, olive oil.',
-      dueDate: today,
-      dueTime: '17:30',
-      location: 'Green Supermarket',
-      category: 'Errands',
-      priority: 'medium',
-      completed: false,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    },
-    {
-      id: 'task-3',
-      userId: 'local-user',
-      title: 'Evening gym cardio session',
-      description: '30 mins treadmill interval running + stretch routine.',
-      dueDate: today,
-      dueTime: '19:00',
-      location: 'Fitness Center',
-      category: 'Health',
-      priority: 'low',
-      completed: false,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    },
-    {
-      id: 'task-4',
-      userId: 'local-user',
-      title: 'Dentist routine checkup',
-      description: 'Annual cleaning and check dental x-ray records.',
-      dueDate: tomorrow,
-      dueTime: '14:30',
-      location: 'Downtown Dental Clinic',
-      category: 'Health',
-      priority: 'high',
-      completed: false,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    },
-  ];
-};
-
 const defaultAlarms: ScheduledCallAlarm[] = [
   { id: 'alarm-1', label: 'Morning Briefing Call', time: '09:00', enabled: true, callType: 'morning_brief' },
   { id: 'alarm-2', label: 'Afternoon Check-in', time: '14:00', enabled: false, callType: 'afternoon_check' },
@@ -102,353 +29,73 @@ const defaultAlarms: ScheduledCallAlarm[] = [
 ];
 
 export default function App() {
-  const [user, setUser] = useState<FirebaseUser | null>(null);
-  const [isFirebaseConnected, setIsFirebaseConnected] = useState(false);
-  const [activeTab, setActiveTab] = useState<string>('tasks');
-  const [tasks, setTasks] = useState<Task[]>(() => {
-    try {
-      const saved = localStorage.getItem('getitdone_tasks');
-      return saved ? JSON.parse(saved) : getInitialTasks();
-    } catch {
-      return getInitialTasks();
-    }
-  });
-
-  // Scheduled Call Alarms
-  const [alarms, setAlarms] = useState<ScheduledCallAlarm[]>(() => {
-    try {
-      const saved = localStorage.getItem('getitdone_call_alarms');
-      return saved ? JSON.parse(saved) : defaultAlarms;
-    } catch {
-      return defaultAlarms;
-    }
-  });
-
-  // Automated Messages
-  const [automatedMessages, setAutomatedMessages] = useState<AutomatedMessage[]>(() => {
-    try {
-      const saved = localStorage.getItem('getitdone_auto_messages');
-      return saved ? JSON.parse(saved) : [
-        {
-          id: 'welcome-msg',
-          type: 'briefing',
-          title: 'Welcome to Get It Done',
-          body: 'Your AI assistant is active and ready to keep you updated on all your daily tasks.',
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          read: false,
-        }
-      ];
-    } catch {
-      return [];
-    }
-  });
+  const store = useTasks();
+  const { user, tasks, scope } = store;
+  const isFirebaseConnected = !!user && !store.syncError && store.pendingCount === 0;
+  const [activeTab, setActiveTab] = useState(() => new URLSearchParams(location.search).get('view') === 'call' ? 'call' : 'tasks');
+  const [alarms, setAlarms] = useScopedState(scope, 'alarms', () => defaultAlarms);
+  const [automatedMessages, setAutomatedMessages] = useScopedState<AutomatedMessage[]>(scope, 'messages', () => []);
+  const [taskAlertsEnabled, setTaskAlertsEnabled] = useScopedState(scope, 'alerts', () => true);
+  const [voiceName, setVoiceName] = useScopedState(scope, 'voice', () => 'Puck');
+  const [hybridMode, setHybridMode] = useScopedState(scope, 'hybrid', () => true);
   const [isMessagesDrawerOpen, setIsMessagesDrawerOpen] = useState(false);
   const [isGemmaModalOpen, setIsGemmaModalOpen] = useState(false);
+  const [notice, setNotice] = useState('');
+  const [latestWorkUpdate, setLatestWorkUpdate] = useState('');
+  const call = useVoiceCall(tasks, user?.displayName || 'there', hybridMode ? voiceName : 'Device-Local', scope);
+  const { callState, triggerCall: handleTriggerCall, answerCall: handleAnswerCall, declineCall: handleDeclineCall, endCall: handleEndCall } = call;
+  const background = useBackgroundReminders(user, alarms, taskAlertsEnabled, store.authReady);
+  useEffect(() => { localStorage.setItem('getitdone_hybrid_mode', String(hybridMode)); }, [hybridMode]);
+  useEffect(() => { setLatestWorkUpdate(''); setNotice(''); setIsMessagesDrawerOpen(false); setIsGemmaModalOpen(false); }, [scope]);
 
-  // Settings
-  const [taskAlertsEnabled, setTaskAlertsEnabled] = useState<boolean>(() => {
-    return localStorage.getItem('getitdone_task_alerts') !== 'false';
+  const handleAddTask = (title: string, dueDate: string, dueTime?: string | null, priority: TaskPriority = 'medium', category: TaskCategory = 'Personal', location?: string | null, description = '') => {
+    const parsed = taskFields.safeParse({ title, dueDate, dueTime: dueTime || null, priority, category, location: location || null, description });
+    if (!parsed.success) { setNotice('Please enter a valid title, date, and time.'); return; }
+    store.addTask(parsed.data); hapticService.taskCreate();
+  };
+  const handleUpdateTask = (id: string, updates: Partial<Task>) => {
+    const current = tasks.find(t => t.id === id);
+    if (!current || !taskFields.safeParse({ ...current, ...updates }).success) { setNotice('That task change is invalid.'); return; }
+    store.updateTask(id, updates);
+  };
+  const handleCompleteTaskFromCall = (id: string) => {
+    if (tasks.some(t => t.id === id && !t.completed)) { store.updateTask(id, { completed: true, completedAt: new Date().toISOString() }); hapticService.taskComplete(); }
+  };
+  const handleToggleTask = (id: string, completed: boolean) => {
+    if (!tasks.some(t => t.id === id)) return;
+    store.updateTask(id, { completed: !completed, completedAt: completed ? null : new Date().toISOString() });
+    completed ? hapticService.taskUncheck() : hapticService.taskComplete();
+  };
+  const handleDeleteTask = (id: string) => { store.deleteTask(id); hapticService.taskDelete(); };
+  const onAction = (input: unknown) => executeTaskAction(input, tasks, {
+    add: t => handleAddTask(t.title, t.dueDate, t.dueTime, t.priority, t.category, t.location, t.description),
+    update: handleUpdateTask, complete: handleCompleteTaskFromCall, delete: handleDeleteTask,
   });
-  const [voiceName, setVoiceName] = useState<string>(() => {
-    return localStorage.getItem('getitdone_voice') || 'Puck';
-  });
-  const [hybridMode, setHybridMode] = useState<boolean>(() => {
-    return localStorage.getItem('getitdone_hybrid_mode') !== 'false';
-  });
-
-  // Call & AI Briefing State
-  const [callState, setCallState] = useState<ActiveCallState>('idle');
-  const [activeAlarmLabel, setActiveAlarmLabel] = useState<string>('Daily Briefing');
-  const [latestWorkUpdate, setLatestWorkUpdate] = useState<string>('');
-
-  const lastCheckedMinute = useRef<string>('');
-  const notifiedTasksRef = useRef<Set<string>>(new Set());
-  const lastProactiveCheckRef = useRef<number>(Date.now());
-
-  // Local persistence
-  useEffect(() => {
-    try {
-      localStorage.setItem('getitdone_tasks', JSON.stringify(tasks));
-    } catch (e) {
-      console.warn('LocalStorage error:', e);
+  useReminders(scope, tasks, alarms, taskAlertsEnabled, event => {
+    setAutomatedMessages(prev => [{ ...event, timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), read: false }, ...prev].slice(0, 500));
+    if (!event.fromPush) notificationService.sendNotification(event.title, event.body, () => setActiveTab(event.type === 'call' ? 'call' : 'tasks'), event.id);
+    if (event.type === 'call') {
+      const alarm = alarms.find(a => a.id === event.alarmId);
+      if (alarm) handleTriggerCall(alarm.label, alarm.callType);
     }
-  }, [tasks]);
-
+  }, store.authReady);
   useEffect(() => {
-    try {
-      localStorage.setItem('getitdone_call_alarms', JSON.stringify(alarms));
-    } catch (e) {
-      console.warn('LocalStorage error:', e);
-    }
-  }, [alarms]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('getitdone_auto_messages', JSON.stringify(automatedMessages));
-    } catch (e) {
-      console.warn('LocalStorage error:', e);
-    }
-  }, [automatedMessages]);
-
-  // Boot: Listen to Auth state
-  useEffect(() => {
-    const unsubAuth = onAuthStateChanged(auth, (firebaseUser) => {
-      setUser(firebaseUser);
-      setIsFirebaseConnected(!!firebaseUser);
-    });
-
-    return () => unsubAuth();
-  }, []);
-
-  // Listen to Firestore tasks if authenticated
-  useEffect(() => {
-    if (!user) return;
-
-    const unsub = subscribeToUserTasks(
-      user.uid,
-      (cloudTasks) => {
-        if (cloudTasks.length > 0) {
-          setTasks(cloudTasks);
-        } else {
-          tasks.forEach((t) => {
-            saveTaskToFirestore({ ...t, userId: user.uid });
-          });
-        }
-      },
-      (err) => {
-        console.warn('Firestore subscription notice, fallback to local:', err);
-      }
-    );
-
-    return () => unsub();
-  }, [user]);
-
-  // Automated Alarm Scheduler & Due Task Watcher
-  useEffect(() => {
-    const runSchedulerCheck = () => {
-      const now = new Date();
-      const currentHhMm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-      const todayIso = now.toISOString().split('T')[0];
-
-      // 1. Check Scheduled Call Alarms
-      if (callState === 'idle') {
-        // Pre-warm & load speech 1 minute before scheduled alarm
-        const nextMin = new Date(now.getTime() + 60 * 1000);
-        const nextMinHhMm = `${String(nextMin.getHours()).padStart(2, '0')}:${String(nextMin.getMinutes()).padStart(2, '0')}`;
-        const upcomingAlarm = alarms.find((a) => a.enabled && a.time === nextMinHhMm);
-        if (upcomingAlarm) {
-          voiceCallService.prepareCall(tasks, user?.displayName || 'there', voiceName);
-        }
-
-        if (lastCheckedMinute.current !== currentHhMm) {
-          const matchingAlarm = alarms.find((a) => a.enabled && a.time === currentHhMm);
-          if (matchingAlarm) {
-            lastCheckedMinute.current = currentHhMm;
-            setActiveAlarmLabel(matchingAlarm.label);
-
-            // Automated System Message
-            const newMsg: AutomatedMessage = {
-              id: `call-${Date.now()}`,
-              type: 'call',
-              title: `Incoming Call: ${matchingAlarm.label}`,
-              body: `Scheduled briefing call triggered at ${matchingAlarm.time}. Ringing your phone...`,
-              timestamp: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-              read: false,
-            };
-            setAutomatedMessages((prev) => [newMsg, ...prev]);
-
-            // Push Notification
-            notificationService.sendNotification(
-              `📞 AI Call: ${matchingAlarm.label}`,
-              `Your daily task briefing is calling you. Tap to answer.`,
-              () => handleTriggerCall(matchingAlarm.label)
-            );
-
-            // Trigger simulated incoming phone call
-            handleTriggerCall(matchingAlarm.label);
-            return;
-          }
-        }
-      }
-
-      // 2. Check Due Tasks (Automated Reminders)
-      if (taskAlertsEnabled) {
-        tasks.forEach((task) => {
-          if (!task.completed && task.dueDate === todayIso && task.dueTime === currentHhMm) {
-            const key = `${task.id}-${todayIso}-${currentHhMm}`;
-            if (!notifiedTasksRef.current.has(key)) {
-              notifiedTasksRef.current.add(key);
-
-              // Automated Message
-              const autoRem: AutomatedMessage = {
-                id: `task-rem-${Date.now()}-${task.id}`,
-                type: task.priority === 'high' ? 'urgent' : 'reminder',
-                title: `Task Due: ${task.title}`,
-                body: `Scheduled for ${task.dueTime}${task.location ? ` at ${task.location}` : ''}. Time to get it done!`,
-                timestamp: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                read: false,
-                taskId: task.id,
-              };
-              setAutomatedMessages((prev) => [autoRem, ...prev]);
-
-              // Push Notification
-              notificationService.sendNotification(
-                `⏰ Task Due: ${task.title}`,
-                `Scheduled for ${task.dueTime}. Tap to complete.`,
-                () => setActiveTab('tasks')
-              );
-            }
-          }
-        });
-      }
-
-      // 3. Proactive Assistant Work Update (Time to time check-in)
-      const nowMs = Date.now();
-      if (nowMs - lastProactiveCheckRef.current > 30 * 60 * 1000) {
-        lastProactiveCheckRef.current = nowMs;
-        const checkin = localGemmaEngine.generateProactiveCheckin(tasks);
-        setLatestWorkUpdate(checkin.body);
-        notificationService.sendNotification(`🤖 ${checkin.title}`, checkin.body);
-
-        setAutomatedMessages((prev) => [
-          {
-            id: `proactive-${nowMs}`,
-            type: checkin.type,
-            title: checkin.title,
-            body: checkin.body,
-            timestamp: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            read: false,
-          },
-          ...prev,
-        ]);
-      }
+    const receive = (message: MessageEvent) => {
+      if (message.data?.type === 'open-reminder' && message.data.event?.uid === scope) setActiveTab(message.data.event.type === 'call' ? 'call' : 'tasks');
     };
-
-    const interval = setInterval(runSchedulerCheck, 12000);
-    return () => clearInterval(interval);
-  }, [alarms, tasks, callState, taskAlertsEnabled]);
-
-  // Call Handlers
-  const handleTriggerCall = (label = 'AI Call Briefing') => {
-    setActiveAlarmLabel(label);
-    setCallState('ringing');
-    audioService.startIncomingRingtone();
-    hapticService.startIncomingCallVibration();
-    // Proactively pre-process and load what GID will say right as the phone begins ringing
-    voiceCallService.prepareCall(tasks, user?.displayName || 'there', voiceName);
-  };
-
-  const handleAnswerCall = () => {
-    audioService.stopIncomingRingtone();
-    audioService.playConnectChime();
-    hapticService.callAnswer();
-    setCallState('connected');
-  };
-
-  const handleDeclineCall = () => {
-    audioService.stopIncomingRingtone();
-    voiceCallService.clear();
-    hapticService.callEnd();
-    setCallState('idle');
-  };
-
-  const handleEndCall = () => {
-    audioService.stopSpeaking();
-    audioService.playDisconnectTone();
-    voiceCallService.clear();
-    hapticService.callEnd();
-    setCallState('idle');
-  };
-
-  // Task Mutators
-  const handleToggleTask = (taskId: string, currentCompleted: boolean) => {
-    // Distinct light vibration feedback on completion / uncheck
-    if (!currentCompleted) {
-      hapticService.taskComplete();
-    } else {
-      hapticService.taskUncheck();
-    }
-
-    const updated = tasks.map((t) =>
-      t.id === taskId
-        ? {
-            ...t,
-            completed: !currentCompleted,
-            completedAt: !currentCompleted ? new Date().toISOString() : null,
-            updatedAt: new Date().toISOString(),
-          }
-        : t
-    );
-    setTasks(updated);
-
-    if (user) {
-      updateTaskInFirestore(taskId, {
-        completed: !currentCompleted,
-        completedAt: !currentCompleted ? new Date().toISOString() : null,
-      });
-    }
-  };
-
-  const handleAddTask = (
-    title: string,
-    dueDate: string,
-    dueTime?: string | null,
-    priority: TaskPriority = 'medium',
-    category: TaskCategory = 'Personal',
-    location?: string | null,
-    description?: string
-  ) => {
-    hapticService.taskCreate();
-
-    const newTask: Task = {
-      id: `task-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
-      userId: user?.uid || 'local-user',
-      title,
-      description: description || '',
-      dueDate,
-      dueTime: dueTime || null,
-      location: location || null,
-      category,
-      priority,
-      completed: false,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    setTasks((prev) => [newTask, ...prev]);
-
-    if (user) {
-      saveTaskToFirestore(newTask);
-    }
-  };
-
-  const handleUpdateTask = (taskId: string, updates: Partial<Task>) => {
-    setTasks((prev) =>
-      prev.map((t) => (t.id === taskId ? { ...t, ...updates, updatedAt: new Date().toISOString() } : t))
-    );
-
-    if (user) {
-      updateTaskInFirestore(taskId, updates);
-    }
-  };
-
-  const handleDeleteTask = (taskId: string) => {
-    hapticService.taskDelete();
-
-    setTasks((prev) => prev.filter((t) => t.id !== taskId));
-
-    if (user) {
-      deleteTaskFromFirestore(taskId);
-    }
-  };
-
-  const handleCompleteTaskFromCall = (taskId: string) => {
-    handleToggleTask(taskId, false);
-  };
-
-  const pendingCount = tasks.filter((t) => !t.completed).length;
-  const unreadMessagesCount = automatedMessages.filter((m) => !m.read).length;
-
+    navigator.serviceWorker?.addEventListener('message', receive);
+    return () => navigator.serviceWorker?.removeEventListener('message', receive);
+  }, [scope]);
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const checkin = localGemmaEngine.generateProactiveCheckin(tasks);
+      setLatestWorkUpdate(checkin.body);
+    }, 30 * 60 * 1000);
+    return () => clearInterval(timer);
+  }, [tasks, scope]);
+  if (!store.authReady) return <div className="p-8 text-center">Loading your task workspace…</div>;
+  const pendingCount = tasks.filter(t => !t.completed).length;
+  const unreadMessagesCount = automatedMessages.filter(m => !m.read).length;
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans">
       {/* Top Bar Contract (Wordmark, Status, CTA, Profile, Notifications) */}
@@ -465,6 +112,8 @@ export default function App() {
         activeTab={activeTab}
       />
 
+      {(notice || store.syncError) && <div role="status" className="max-w-4xl mx-auto p-3 text-sm text-amber-700">{notice || store.syncError}</div>}
+      {store.guestCount > 0 && <div className="max-w-4xl mx-auto p-3 text-sm"><span>{store.guestCount} guest tasks are saved separately on this device. </span><button className="text-indigo-600" onClick={store.importGuestTasks}>Copy into this account</button></div>}
       {/* Main Content Area */}
       <main className="flex-1 w-full max-w-4xl mx-auto px-2 sm:px-4">
         {activeTab === 'tasks' && (
@@ -502,7 +151,7 @@ export default function App() {
               <div>
                 <h2 className="text-2xl font-bold tracking-tight">AI Voice Call Briefings</h2>
                 <p className="text-xs text-indigo-100 mt-1 max-w-md leading-relaxed">
-                  Your AI assistant rings your phone with an incoming call at your scheduled times, reads your agenda out loud, and lets you speak commands hands-free.
+                  Scheduled briefings ring while the app is open. Enable background alerts in Settings to receive notifications when it is closed. Open an alert to start a hands-free briefing.
                 </p>
               </div>
 
@@ -533,7 +182,7 @@ export default function App() {
                   {alarms.filter((a) => a.enabled).length} Active
                 </p>
                 <span className="text-[11px] text-slate-400 mt-1 block">
-                  Next: {alarms.find((a) => a.enabled)?.time || 'None'}
+                  Times follow your device timezone.
                 </span>
               </div>
             </div>
@@ -575,9 +224,10 @@ export default function App() {
 
         {activeTab === 'chat' && (
           <ChatAssistantView
+            key={scope}
             tasks={tasks}
-            onAddTask={handleAddTask}
-            onCompleteTask={handleCompleteTaskFromCall}
+            onAction={onAction}
+            hybridMode={hybridMode}
             onTriggerCall={() => handleTriggerCall('Chat Triggered Call')}
           />
         )}
@@ -606,6 +256,10 @@ export default function App() {
               localStorage.setItem('getitdone_hybrid_mode', String(val));
             }}
             onOpenGemmaModal={() => setIsGemmaModalOpen(true)}
+            backgroundStatus={background.status}
+            backgroundEnabled={background.enabled}
+            onEnableBackground={background.enable}
+            onDisableBackground={background.disable}
           />
         )}
       </main>
@@ -613,16 +267,18 @@ export default function App() {
       {/* Floating Messenger-Style Chat Head Bubble */}
       <ChatHeadBubble
         tasks={tasks}
-        onAddTask={handleAddTask}
+        onAction={onAction}
         onTriggerCall={() => handleTriggerCall('Chat Head Call')}
         latestWorkUpdate={latestWorkUpdate}
-        useLocalGemma={true}
+        key={scope}
+        hybridMode={hybridMode}
       />
 
       {/* Full Simulated Phone Call Modal */}
       {callState !== 'idle' && (
         <AICallModal
           callState={callState}
+          callType={call.callType}
           onAnswerCall={handleAnswerCall}
           onDeclineCall={handleDeclineCall}
           onEndCall={handleEndCall}
@@ -634,7 +290,9 @@ export default function App() {
           }
           onUpdateTask={handleUpdateTask}
           onDeleteTask={handleDeleteTask}
-          voiceName={voiceName}
+          voiceName={hybridMode ? voiceName : 'Device-Local'}
+          hybridMode={hybridMode}
+          onAction={onAction}
         />
       )}
 

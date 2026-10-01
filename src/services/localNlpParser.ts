@@ -1,4 +1,5 @@
 import { TaskCategory, TaskPriority } from '../types';
+import { isCalendarDate } from '../shared/dates';
 
 export interface ParsedTaskResult {
   title: string;
@@ -9,9 +10,8 @@ export interface ParsedTaskResult {
   priority: TaskPriority;
 }
 
-export function parseTaskLocally(rawInput: string): ParsedTaskResult {
+export function parseTaskLocally(rawInput: string, now = new Date()): ParsedTaskResult {
   let text = rawInput.trim();
-  const now = new Date();
   
   // Format Date to YYYY-MM-DD
   const formatIsoDate = (d: Date): string => {
@@ -54,13 +54,20 @@ export function parseTaskLocally(rawInput: string): ParsedTaskResult {
   }
 
   // 3. Detect Relative Days (English & Bangla)
-  if (/\b(today|tonight)\b/i.test(text) || /(আজকে|আজ)/.test(text)) {
+  const explicitDate = text.match(/\b\d{4}-\d{2}-\d{2}\b/);
+  if (explicitDate && isCalendarDate(explicitDate[0])) {
+    targetDate = new Date(`${explicitDate[0]}T12:00:00`);
+    text = text.replace(explicitDate[0], '').trim();
+  } else if (/\bday after tomorrow\b/i.test(text) || /(পরশুদিন|পরশু)/.test(text)) {
+    targetDate.setDate(targetDate.getDate() + 2);
+    text = text.replace(/\bday after tomorrow\b/gi, '').replace(/(পরশুদিন|পরশু)/g, '').trim();
+  } else if (/\b(today|tonight)\b/i.test(text) || /(আজকে|আজ)/.test(text)) {
     targetDate = new Date(now);
     text = text.replace(/\b(today|tonight)\b/gi, '').replace(/(আজকে|আজ)/g, '').trim();
-  } else if (/\btomorrow\b/i.test(text) || /(কালকে|কাল|আগামীকাল)/.test(text)) {
+  } else if (/\btomorrow\b/i.test(text) || /(আগামীকাল|কালকে|(?<![\u0980-\u09ff])কাল(?![\u0980-\u09ff]))/.test(text)) {
     targetDate = new Date(now);
     targetDate.setDate(targetDate.getDate() + 1);
-    text = text.replace(/\btomorrow\b/gi, '').replace(/(কালকে|কাল|আগামীকাল)/g, '').trim();
+    text = text.replace(/\btomorrow\b/gi, '').replace(/(আগামীকাল|কালকে|(?<![\u0980-\u09ff])কাল(?![\u0980-\u09ff]))/g, '').trim();
   } else if (/\bday after tomorrow\b/i.test(text) || /(পরশু|পরশুদিন)/.test(text)) {
     targetDate = new Date(now);
     targetDate.setDate(targetDate.getDate() + 2);
@@ -83,7 +90,7 @@ export function parseTaskLocally(rawInput: string): ParsedTaskResult {
   }
 
   // 4. Detect Time (English "4pm", "3:30 pm", "14:00" & Bangla "বিকেল ৫টা", "সকাল ১০টায়", "রাত ৮টা")
-  const banglaPeriodMatch = text.match(/(সকাল|দুপুর|বিকেল|সন্ধ্যা|রাত)\s*(\d{1,2})(?::(\d{2}))?\s*(?:টা|টায়)?/);
+  const banglaPeriodMatch = text.match(/(সকাল|দুপুর|বিকেল|সন্ধ্যা|রাত)\s*(\d{1,2})(?::(\d{2}))?\s*(?:টায়|টা)?/);
   if (banglaPeriodMatch) {
     const period = banglaPeriodMatch[1];
     let hour = parseInt(banglaPeriodMatch[2], 10);
@@ -94,7 +101,7 @@ export function parseTaskLocally(rawInput: string): ParsedTaskResult {
     }
     if (period === 'রাত' && hour === 24) hour = 0;
 
-    if (hour >= 0 && hour <= 23) {
+    if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {
       dueTime = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
       text = text.replace(banglaPeriodMatch[0], '').trim();
     }

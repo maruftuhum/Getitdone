@@ -131,6 +131,12 @@ export async function signInWithGoogle(): Promise<FirebaseUser | null> {
 }
 
 export async function logOut(): Promise<void> {
+  if ('serviceWorker' in navigator) {
+    const reg = await navigator.serviceWorker.getRegistration();
+    const sub = await reg?.pushManager?.getSubscription();
+    if (sub && !(await sub.unsubscribe())) throw new Error('Unable to disable background alerts. Please retry signing out.');
+  }
+  localStorage.removeItem('getitdone_push_owner');
   await signOut(auth);
 }
 
@@ -163,7 +169,7 @@ export function subscribeToUserTasks(
       if (onError) onError(error);
       // Only throw security/permission errors to diagnose rules issues
       if (error?.code === 'permission-denied') {
-        handleFirestoreError(error, OperationType.LIST, path);
+        console.error('Task subscription permission denied.');
       } else {
         // Log gracefully for connection unavailable / offline transition
         console.warn('Firestore real-time connection status:', error?.message || 'offline mode');
@@ -181,7 +187,7 @@ export async function saveTaskToFirestore(task: Task): Promise<void> {
     if (error?.code === 'permission-denied') {
       handleFirestoreError(error, OperationType.CREATE, path);
     } else {
-      console.warn('Task saved to offline queue:', error?.message);
+      throw error;
     }
   }
 }
@@ -202,7 +208,7 @@ export async function updateTaskInFirestore(taskId: string, updates: Partial<Tas
     if (error?.code === 'permission-denied') {
       handleFirestoreError(error, OperationType.UPDATE, path);
     } else {
-      console.warn('Task update queued offline:', error?.message);
+      throw error;
     }
   }
 }
@@ -216,7 +222,7 @@ export async function deleteTaskFromFirestore(taskId: string): Promise<void> {
     if (error?.code === 'permission-denied') {
       handleFirestoreError(error, OperationType.DELETE, path);
     } else {
-      console.warn('Task deletion queued offline:', error?.message);
+      throw error;
     }
   }
 }

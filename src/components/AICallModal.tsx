@@ -17,13 +17,19 @@ import {
   Calendar,
   AlertCircle
 } from 'lucide-react';
-import { ActiveCallState, Task } from '../types';
+import { ActiveCallState, Task, CallType } from '../types';
 import { audioService } from '../services/audioService';
 import { voiceCallService } from '../services/voiceCallService';
 import { hapticService } from '../services/hapticService';
 
+import { askAssistant } from '../services/assistantService';
+import type { ActionResult } from '../shared/taskActions';
+
 interface AICallModalProps {
+  onAction: (input: unknown) => ActionResult;
+  hybridMode: boolean;
   callState: ActiveCallState;
+  callType: CallType;
   onAnswerCall: () => void;
   onDeclineCall: () => void;
   onEndCall: () => void;
@@ -45,6 +51,9 @@ interface AICallModalProps {
 
 export const AICallModal: React.FC<AICallModalProps> = ({
   callState,
+  callType,
+  onAction,
+  hybridMode,
   onAnswerCall,
   onDeclineCall,
   onEndCall,
@@ -76,6 +85,10 @@ export const AICallModal: React.FC<AICallModalProps> = ({
   const recognitionRef = useRef<any>(null);
   const speechTranscriptRef = useRef<string>('');
   const tasksRef = useRef<Task[]>(tasks);
+  const turnController = useRef<AbortController | null>(null);
+  useEffect(() => {
+    return () => { turnController.current?.abort(); recognitionRef.current?.abort(); audioService.stopSpeaking(); };
+  }, []);
 
   useEffect(() => {
     tasksRef.current = tasks;
@@ -106,7 +119,7 @@ export const AICallModal: React.FC<AICallModalProps> = ({
     if (callState === 'ringing') {
       setIsPreloaded(false);
       voiceCallService
-        .prepareCall(tasks, userName, voiceName)
+        .prepareCall(tasks, userName, voiceName, callType)
         .then((prep) => {
           setBriefingText(prep.script);
           setIsPreloaded(true);
@@ -119,7 +132,7 @@ export const AICallModal: React.FC<AICallModalProps> = ({
     } else if (callState === 'idle') {
       setIsPreloaded(false);
     }
-  }, [callState, tasks, userName, voiceName]);
+  }, [callState, tasks, userName, voiceName, callType]);
 
   // When user answers (connects): GID speaks immediately without delay!
   useEffect(() => {
@@ -134,7 +147,7 @@ export const AICallModal: React.FC<AICallModalProps> = ({
     let scriptToSpeak = briefingText;
     if (!scriptToSpeak) {
       try {
-        const prepPromise = voiceCallService.prepareCall(tasks, userName, voiceName);
+        const prepPromise = voiceCallService.prepareCall(tasks, userName, voiceName, callType);
         const timeoutPromise = new Promise<{ script: string }>((resolve) =>
           setTimeout(
             () => resolve({ script: voiceCallService.getInstantFallbackScript(tasks, userName) }),
@@ -247,28 +260,18 @@ export const AICallModal: React.FC<AICallModalProps> = ({
     setConversationHistory(newHistory);
 
     try {
-      const res = await fetch('/api/call-conversation', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: newHistory,
-          tasks: tasksRef.current,
-          userName,
-          voice: voiceName,
-          language: callLanguage === 'bn-BD' ? 'bn' : 'en',
-        }),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
+      turnController.current = new AbortController();
+      const data = await askAssistant(newHistory, tasksRef.current, hybridMode, {
+        userName, voice: voiceName, language: callLanguage === 'bn-BD' ? 'bn' : 'en',
+      }, turnController.current.signal);
+      if (turnController.current.signal.aborted) return;
+      {
+        const outcome = data.action ? onAction(data.action) : null;
+        if (outcome && !outcome.ok) { data.reply = outcome.message; data.audioBase64 = null; }
+        if (outcome?.ok) setActionNotice({ type: data.action.action === 'CREATE_TASK' ? 'create' : data.action.action === 'COMPLETE_TASK' ? 'complete' : data.action.action === 'DELETE_TASK' ? 'delete' : 'update', text: outcome.message });
         const reply = data.reply || (callLanguage === 'bn-BD' ? 'আমি বিষয়টি নোট করেছি।' : 'I have noted that.');
         setBriefingText(reply);
         setConversationHistory((prev) => [...prev, { role: 'assistant', content: reply }]);
-
-        // Execute instructed actions during the live phone call!
-        if (data.action) {
-          executeCallAction(data.action);
-        }
 
         // Speak response out loud in the call
         if (data.audioBase64) {
@@ -293,131 +296,13 @@ export const AICallModal: React.FC<AICallModalProps> = ({
             }
           );
         }
-      } else {
-        throw new Error('Call conversation endpoint failed');
       }
     } catch (err) {
       console.warn('Fallback to local call command parser:', err);
-      handleLocalFallbackInstruction(spokenText);
+      setCallStatusMessage('Please try that instruction again.');
     } finally {
       setIsProcessingTurn(false);
     }
-  };
-
-  // Execute Task Instruction returned by Gemini during call
-  const executeCallAction = (actionObj: any) => {
-    const { action, task, updates, taskId } = actionObj;
-    const currentTasks = tasksRef.current;
-    const today = new Date().toISOString().split('T')[0];
-
-    if (action === 'CREATE_TASK' && task) {
-      hapticService.taskCreate();
-      onAddTask(
-        task.title || 'New Task',
-        task.dueDate || today,
-        task.dueTime || null,
-        task.priority || 'medium',
-        task.category || 'Personal',
-        task.location || null
-      );
-      setActionNotice({
-        type: 'create',
-        text: `Added: "${task.title}"${task.dueTime ? ` at ${task.dueTime}` : ''}`,
-      });
-    } else if (action === 'UPDATE_TASK') {
-      hapticService.taskCreate();
-      const target = currentTasks.find((t) => t.id === taskId) || currentTasks[0];
-      if (target && onUpdateTask) {
-        onUpdateTask(target.id, updates || {});
-        setActionNotice({
-          type: 'update',
-          text: `Updated: "${target.title}"`,
-        });
-      }
-    } else if (action === 'COMPLETE_TASK') {
-      hapticService.taskComplete();
-      const target = currentTasks.find((t) => t.id === taskId) || currentTasks.find((t) => !t.completed);
-      if (target) {
-        onCompleteTask(target.id);
-        setActionNotice({
-          type: 'complete',
-          text: `Completed: "${target.title}"`,
-        });
-      }
-    } else if (action === 'DELETE_TASK') {
-      hapticService.taskDelete();
-      const target = currentTasks.find((t) => t.id === taskId);
-      if (target && onDeleteTask) {
-        onDeleteTask(target.id);
-        setActionNotice({
-          type: 'delete',
-          text: `Deleted: "${target.title}"`,
-        });
-      }
-    }
-
-    // Auto clear action badge after 4.5 seconds
-    setTimeout(() => {
-      setActionNotice(null);
-    }, 4500);
-  };
-
-  // Local Bangla & English Offline Action Parser Fallback
-  const handleLocalFallbackInstruction = (text: string) => {
-    const lower = text.toLowerCase();
-    const today = new Date().toISOString().split('T')[0];
-    const pending = tasksRef.current.filter((t) => !t.completed);
-
-    // Bangla & English Task Completion
-    if (
-      lower.includes('done') || 
-      lower.includes('complete') || 
-      lower.includes('finish') ||
-      text.includes('শেষ') || 
-      text.includes('কমপ্লিট') || 
-      text.includes('টিক')
-    ) {
-      if (pending.length > 0) {
-        const top = pending[0];
-        onCompleteTask(top.id);
-        const reply = callLanguage === 'bn-BD'
-          ? `"${top.title}" কাজটি সম্পন্ন করা হয়েছে। খুব ভালো কাজ!`
-          : `Marked "${top.title}" as completed. Great job!`;
-        setBriefingText(reply);
-        audioService.speakBriefing(reply, voiceName);
-      }
-      return;
-    }
-
-    // Bangla & English Task Creation
-    if (
-      lower.includes('add') || 
-      lower.includes('create') || 
-      lower.includes('schedule') ||
-      text.includes('যোগ') || 
-      text.includes('অ্যাড') || 
-      text.includes('করতে হবে')
-    ) {
-      const cleanTitle = text
-        .replace(/\b(add|create|schedule|remind me to)\b/gi, '')
-        .replace(/(যোগ করো|অ্যাড করো|করতে হবে)/g, '')
-        .trim();
-      const finalTitle = cleanTitle || (callLanguage === 'bn-BD' ? 'নতুন কাজ' : 'Quick Task');
-      onAddTask(finalTitle, today, null, 'medium');
-      const reply = callLanguage === 'bn-BD'
-        ? `আমি "${finalTitle}" টাস্ক লিস্টে যুক্ত করে দিয়েছি।`
-        : `I've added "${finalTitle}" to your task list for today.`;
-      setBriefingText(reply);
-      audioService.speakBriefing(reply, voiceName);
-      return;
-    }
-
-    // Default conversational reply
-    const reply = callLanguage === 'bn-BD'
-      ? 'আমি আপনার কথা শুনেছি। আর কোনো কাজ যোগ বা পরিবর্তন করতে চান?'
-      : "I heard you! Let me know if you want to add, reschedule, or complete any task.";
-    setBriefingText(reply);
-    audioService.speakBriefing(reply, voiceName);
   };
 
   const handleQuickAction = (instruction: string) => {
