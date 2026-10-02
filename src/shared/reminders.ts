@@ -1,5 +1,5 @@
-import type { Task, ScheduledCallAlarm } from '../types';
-import { zonedClock } from './dates';
+import type { Task, ScheduledCallAlarm } from '../types/index.ts';
+import { zonedClock } from './dates.ts';
 
 export interface ReminderEvent { id: string; type: 'call' | 'reminder' | 'urgent'; title: string; body: string; taskId?: string; alarmId?: string; fromPush?: boolean }
 // Compare clock minutes in the user's zone. Checking elapsed minutes also catches suspension and DST.

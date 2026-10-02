@@ -48,7 +48,7 @@ export default function App() {
   useEffect(() => { localStorage.setItem('getitdone_hybrid_mode', String(hybridMode)); }, [hybridMode]);
   useEffect(() => { setLatestWorkUpdate(''); setNotice(''); setIsMessagesDrawerOpen(false); setIsGemmaModalOpen(false); }, [scope]);
 
-  const handleAddTask = (title: string, dueDate: string, dueTime?: string | null, priority: TaskPriority = 'medium', category: TaskCategory = 'Personal', location?: string | null, description = '') => {
+  const handleAddTask = (title: string, dueDate: string, dueTime?: string | null, priority: TaskPriority = 'medium', category: TaskCategory = 'General', location?: string | null, description = '') => {
     const parsed = taskFields.safeParse({ title, dueDate, dueTime: dueTime || null, priority, category, location: location || null, description });
     if (!parsed.success) { setNotice('Please enter a valid title, date, and time.'); return; }
     store.addTask(parsed.data); hapticService.taskCreate();

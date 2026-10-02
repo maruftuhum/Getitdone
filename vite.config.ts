@@ -92,7 +92,7 @@ export default defineConfig(() => {
     server: {
       port: 3000,
       host: '0.0.0.0',
-      allowedHosts: process.env.ALLOWED_HOSTS?.split(',').map(value => value.trim()).filter(Boolean) || [],
+      allowedHosts: true as const,
     },
   };
 });

@@ -1,4 +1,4 @@
-export type TaskCategory = 'Personal' | 'Work' | 'Urgent' | 'Health' | 'Errands';
+export type TaskCategory = string;
 export type TaskPriority = 'low' | 'medium' | 'high';
 
 export interface Subtask {

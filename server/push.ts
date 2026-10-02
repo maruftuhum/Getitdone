@@ -2,10 +2,10 @@ import express from 'express';
 import { createHash, randomUUID } from 'node:crypto';
 import webpush from 'web-push';
 import { z } from 'zod';
-import { adminDatabase } from './firebaseAdmin';
-import { alarmSchema, timeZoneSchema, validate } from './security';
-import { dueReminders } from '../src/shared/reminders';
-import type { Task } from '../src/types';
+import { adminDatabase } from './firebaseAdmin.ts';
+import { alarmSchema, timeZoneSchema, validate } from './security.ts';
+import { dueReminders } from '../src/shared/reminders.ts';
+import type { Task } from '../src/types/index.ts';
 
 export function validPushEndpoint(value: string) {
   try {
@@ -18,10 +18,17 @@ export function validPushEndpoint(value: string) {
 const endpointSchema = z.string().max(3000).refine(validPushEndpoint, 'Unsupported push provider');
 const subscriptionSchema = z.object({ endpoint: endpointSchema, expirationTime: z.number().nullable().optional(), keys: z.object({ p256dh: z.string().regex(/^[\w-]{80,150}$/), auth: z.string().regex(/^[\w-]{20,30}$/) }) });
 const scheduleSchema = z.object({ timeZone: timeZoneSchema, alarms: z.array(alarmSchema).max(30), taskAlertsEnabled: z.boolean() });
-const ready = () => process.env.ENABLE_BACKGROUND_REMINDERS === 'true' && !!process.env.VAPID_PUBLIC_KEY && !!process.env.VAPID_PRIVATE_KEY && !!process.env.VAPID_SUBJECT;
+const DEFAULT_VAPID_PUBLIC = 'BC2O4qO4EIUEC3oVr9S5-N3wcCs0L-wBsWjUk6x-MTM8ermVAgmSEWrwbzsrhNb0NgetOosq4Q2eAnomD3s6284';
+const DEFAULT_VAPID_PRIVATE = 'SGIt3_h77nbvYogbpcg-V_PJojpgQ-_sklojlRr8gC4';
+const DEFAULT_VAPID_SUBJECT = 'mailto:mhtahim@gmail.com';
+
+const vapidPublic = () => process.env.VAPID_PUBLIC_KEY || DEFAULT_VAPID_PUBLIC;
+const vapidPrivate = () => process.env.VAPID_PRIVATE_KEY || DEFAULT_VAPID_PRIVATE;
+const vapidSubject = () => process.env.VAPID_SUBJECT || DEFAULT_VAPID_SUBJECT;
+const ready = () => process.env.ENABLE_BACKGROUND_REMINDERS !== 'false' && !!vapidPublic() && !!vapidPrivate() && !!vapidSubject();
 function deviceId(uid: string, endpoint: string) { return createHash('sha256').update(`${uid}:${endpoint}`).digest('hex'); }
 
-export function pushConfig() { return { available: ready(), publicKey: ready() ? process.env.VAPID_PUBLIC_KEY : null }; }
+export function pushConfig() { return { available: ready(), publicKey: ready() ? vapidPublic() : null }; }
 export function createPushRouter() {
   const router = express.Router();
   router.use((_req, res, next) => { if (!ready()) { res.status(503).json({ error: 'Background reminders are not configured on this server.' }); return; } next(); });
@@ -55,7 +62,7 @@ export function createPushRouter() {
 // Firestore leases prevent concurrent workers from sending the same event.
 export function startPushWorker() {
   if (!ready()) return () => {};
-  webpush.setVapidDetails(process.env.VAPID_SUBJECT!, process.env.VAPID_PUBLIC_KEY!, process.env.VAPID_PRIVATE_KEY!);
+  webpush.setVapidDetails(vapidSubject(), vapidPublic(), vapidPrivate());
   let running = false;
   const tick = async () => {
     if (running) return;

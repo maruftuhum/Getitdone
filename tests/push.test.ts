@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { IDBFactory } from 'fake-indexeddb';
-import { reminderLedger } from '../src/services/reminderLedger';
+import { reminderLedger } from '../src/services/reminderLedger.ts';
 
 const source = readFileSync(new URL('../public/push-sw.js', import.meta.url), 'utf8');
 function worker(visible = false) {

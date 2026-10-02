@@ -24,11 +24,18 @@ export function parseTaskLocally(rawInput: string, now = new Date()): ParsedTask
   let targetDate = new Date(now);
   let dueTime: string | null = null;
   let priority: TaskPriority = 'medium';
-  let category: TaskCategory = 'Personal';
+  let category: TaskCategory = 'General';
   let location: string | null = null;
 
   // Convert Bengali numerals to Western digits (০-৯ -> 0-9)
   text = text.replace(/[০-৯]/g, (d) => '০১২৩৪৫৬৭৮৯'.indexOf(d).toString());
+
+  // Check for hashtag custom tags (e.g. #finance, #groceries, #project)
+  const hashTagMatch = text.match(/#([a-zA-Z0-9_\-\u0980-\u09FF]+)/);
+  if (hashTagMatch) {
+    category = hashTagMatch[1];
+    text = text.replace(hashTagMatch[0], '').trim();
+  }
 
   // 1. Detect Priority (English & Bangla)
   if (/\b(urgent|asap|important|critical|p1|emergency)\b/i.test(text) || /(জরুরি|জরুরী|গুরুত্বপূর্ণ)/.test(text)) {
@@ -40,17 +47,6 @@ export function parseTaskLocally(rawInput: string, now = new Date()): ParsedTask
   } else if (/\b(low priority|whenever|someday|p3|optional)\b/i.test(text) || /(কম গুরুত্বপূর্ণ)/.test(text)) {
     priority = 'low';
     text = text.replace(/\b(low priority|whenever|someday|p3|optional)\b/gi, '').trim();
-  }
-
-  // 2. Detect Category
-  if (/\b(work|client|meeting|presentation|report|email|project|bug|feature|standup|call with team)\b/i.test(text) || /(কাজ|মিটিং|অফিস|ক্লায়েন্ট)/.test(text)) {
-    category = 'Work';
-  } else if (/\b(buy|groceries|supermarket|store|shopping|milk|eggs|bread|pick up|clean|laundry)\b/i.test(text) || /(বাজার|কেনাকাটা|মুদি)/.test(text)) {
-    category = 'Errands';
-  } else if (/\b(doctor|dentist|gym|workout|run|medicine|pills|clinic|exercise|therapy|hospital)\b/i.test(text) || /(ডাক্তার|ঔষধ|ব্যায়াম|জিম)/.test(text)) {
-    category = 'Health';
-  } else if (priority === 'high') {
-    category = 'Urgent';
   }
 
   // 3. Detect Relative Days (English & Bangla)

@@ -1,5 +1,5 @@
 import { localDate } from '../shared/dates';
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   Check, 
   Plus, 
@@ -15,7 +15,9 @@ import {
   Mic, 
   MicOff, 
   Sparkles,
-  ListTodo
+  ListTodo,
+  Tag,
+  X
 } from 'lucide-react';
 import { Task, TaskCategory, TaskPriority } from '../types';
 import { parseTaskLocally } from '../services/localNlpParser';
@@ -37,6 +39,9 @@ interface TaskListViewProps {
   onDeleteTask: (taskId: string) => void;
 }
 
+const STORAGE_TAGS_KEY = 'getitdone_custom_tags';
+const legacyPresets = new Set(['work', 'personal', 'urgent', 'health', 'errands', 'general']);
+
 export const TaskListView: React.FC<TaskListViewProps> = ({
   tasks,
   onToggleTask,
@@ -51,7 +56,66 @@ export const TaskListView: React.FC<TaskListViewProps> = ({
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [expandedSubtasks, setExpandedSubtasks] = useState<Record<string, boolean>>({});
 
+  // Custom Tags State
+  const [customTags, setCustomTags] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_TAGS_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.filter((t: any) => typeof t === 'string' && t.trim() && !legacyPresets.has(t.trim().toLowerCase()));
+        }
+      }
+    } catch {}
+    return [];
+  });
+
+  const [isAddingTag, setIsAddingTag] = useState(false);
+  const [newTagInput, setNewTagInput] = useState('');
+  const [selectedQuickTag, setSelectedQuickTag] = useState<string>('General');
+  const [isCreatingModalTag, setIsCreatingModalTag] = useState(false);
+  const [newModalTagName, setNewModalTagName] = useState('');
+
   const todayIso = localDate();
+
+  // Combine user-created tags with any non-preset tags already present on tasks
+  const allTags = useMemo(() => {
+    const set = new Set<string>(customTags);
+    tasks.forEach((t) => {
+      const cat = (t.category || '').trim();
+      if (cat && !legacyPresets.has(cat.toLowerCase())) {
+        set.add(cat);
+      }
+    });
+    return Array.from(set);
+  }, [customTags, tasks]);
+
+  const saveCustomTags = (newTags: string[]) => {
+    setCustomTags(newTags);
+    try {
+      localStorage.setItem(STORAGE_TAGS_KEY, JSON.stringify(newTags));
+    } catch {}
+  };
+
+  const handleCreateTag = (name: string) => {
+    const cleaned = name.trim().replace(/^#/, '');
+    if (!cleaned || legacyPresets.has(cleaned.toLowerCase())) return;
+    if (!allTags.some((t) => t.toLowerCase() === cleaned.toLowerCase())) {
+      const updated = [...allTags, cleaned];
+      saveCustomTags(updated);
+    }
+  };
+
+  const handleDeleteTag = (tagToDelete: string) => {
+    const updated = customTags.filter((t) => t.toLowerCase() !== tagToDelete.toLowerCase());
+    saveCustomTags(updated);
+    if (activeCategory.toLowerCase() === tagToDelete.toLowerCase()) {
+      setActiveCategory('All');
+    }
+    if (selectedQuickTag.toLowerCase() === tagToDelete.toLowerCase()) {
+      setSelectedQuickTag('General');
+    }
+  };
 
   // Filter Tasks
   const filteredTasks = tasks.filter((task) => {
@@ -63,7 +127,8 @@ export const TaskListView: React.FC<TaskListViewProps> = ({
     } else if (activeCategory === 'Completed') {
       if (!task.completed) return false;
     } else if (activeCategory !== 'All') {
-      if (task.category !== activeCategory) return false;
+      const taskCat = (task.category || '').toLowerCase();
+      if (taskCat !== activeCategory.toLowerCase()) return false;
     }
 
     // Search query filter
@@ -72,7 +137,8 @@ export const TaskListView: React.FC<TaskListViewProps> = ({
       const matchTitle = task.title.toLowerCase().includes(q);
       const matchDesc = task.description?.toLowerCase().includes(q);
       const matchLoc = task.location?.toLowerCase().includes(q);
-      if (!matchTitle && !matchDesc && !matchLoc) return false;
+      const matchCat = (task.category || '').toLowerCase().includes(q);
+      if (!matchTitle && !matchDesc && !matchLoc && !matchCat) return false;
     }
 
     return true;
@@ -85,12 +151,23 @@ export const TaskListView: React.FC<TaskListViewProps> = ({
     if (!quickInput.trim()) return;
 
     const parsed = parseTaskLocally(quickInput);
+
+    let finalCategory = 'General';
+    if (parsed.category && parsed.category !== 'General') {
+      finalCategory = parsed.category;
+      handleCreateTag(finalCategory);
+    } else if (selectedQuickTag !== 'General') {
+      finalCategory = selectedQuickTag;
+    } else if (allTags.some((t) => t.toLowerCase() === activeCategory.toLowerCase())) {
+      finalCategory = activeCategory;
+    }
+
     onAddTask(
       parsed.title,
       parsed.dueDate,
       parsed.dueTime,
       parsed.priority,
-      parsed.category,
+      finalCategory,
       parsed.location
     );
     setQuickInput('');
@@ -131,43 +208,163 @@ export const TaskListView: React.FC<TaskListViewProps> = ({
     }
   };
 
-  // Categories list
-  const categoryFilters = ['All', 'Today', 'Upcoming', 'Work', 'Personal', 'Urgent', 'Health', 'Errands', 'Completed'];
-
   return (
     <div className="w-full max-w-3xl mx-auto px-4 py-4 pb-28 space-y-4">
-      {/* Category Tabs (Google Tasks Filter Bar) */}
+      {/* Category & Custom Tags Bar (Google Tasks Filter Bar) */}
       <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar text-xs font-medium">
-        {categoryFilters.map((cat) => {
+        {/* Core System Views */}
+        {[
+          { id: 'All', label: 'All' },
+          { id: 'Today', label: 'Today' },
+          { id: 'Upcoming', label: 'Upcoming' },
+          { id: 'Completed', label: 'Completed' },
+        ].map((view) => {
           const count = tasks.filter((t) => {
-            if (cat === 'All') return true;
-            if (cat === 'Today') return t.dueDate === todayIso && !t.completed;
-            if (cat === 'Upcoming') return t.dueDate > todayIso && !t.completed;
-            if (cat === 'Completed') return t.completed;
-            return t.category === cat && !t.completed;
+            if (view.id === 'All') return true;
+            if (view.id === 'Today') return t.dueDate === todayIso && !t.completed;
+            if (view.id === 'Upcoming') return t.dueDate > todayIso && !t.completed;
+            if (view.id === 'Completed') return t.completed;
+            return false;
           }).length;
 
-          const isActive = activeCategory === cat;
+          const isActive = activeCategory === view.id;
 
           return (
             <button
-              key={cat}
-              onClick={() => setActiveCategory(cat)}
+              key={view.id}
+              onClick={() => setActiveCategory(view.id)}
               className={`px-3 py-2 rounded-xl whitespace-nowrap transition-all flex items-center gap-1.5 touch-manipulation min-h-[44px] ${
                 isActive
                   ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-600/20 font-semibold'
                   : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
               }`}
             >
-              <span>{cat}</span>
-              <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
-                isActive ? 'bg-indigo-700/60 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
-              }`}>
+              <span>{view.label}</span>
+              <span
+                className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                  isActive ? 'bg-indigo-700/60 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
+                }`}
+              >
                 {count}
               </span>
             </button>
           );
         })}
+
+        {/* Separator */}
+        <div className="h-6 w-px bg-slate-200 dark:bg-slate-800 my-auto shrink-0 mx-0.5" />
+
+        {/* User-Defined Custom Tags */}
+        {allTags.map((tag) => {
+          const count = tasks.filter((t) => (t.category || '').toLowerCase() === tag.toLowerCase() && !t.completed).length;
+          const isActive = activeCategory.toLowerCase() === tag.toLowerCase();
+
+          return (
+            <div
+              key={tag}
+              className={`group/tag rounded-xl whitespace-nowrap transition-all flex items-center touch-manipulation min-h-[44px] pl-3 pr-2 py-1.5 gap-1.5 ${
+                isActive
+                  ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-600/20 font-semibold'
+                  : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
+              }`}
+            >
+              <button
+                type="button"
+                onClick={() => setActiveCategory(tag)}
+                className="flex items-center gap-1.5 text-left focus:outline-none"
+              >
+                <Tag className={`w-3 h-3 ${isActive ? 'text-indigo-200' : 'text-indigo-500'}`} />
+                <span>#{tag}</span>
+                <span
+                  className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                    isActive ? 'bg-indigo-700/60 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
+                  }`}
+                >
+                  {count}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDeleteTag(tag);
+                }}
+                className={`p-1 rounded-md transition ${
+                  isActive
+                    ? 'hover:bg-indigo-700/80 text-indigo-200 hover:text-white'
+                    : 'text-slate-400 hover:text-red-500 hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+                title={`Delete tag #${tag}`}
+                aria-label={`Delete tag ${tag}`}
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          );
+        })}
+
+        {/* Add Tag Button or Inline Input */}
+        {isAddingTag ? (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              const val = newTagInput.trim().replace(/^#/, '');
+              if (val) {
+                handleCreateTag(val);
+                setActiveCategory(val);
+                setNewTagInput('');
+                setIsAddingTag(false);
+              }
+            }}
+            className="flex items-center gap-1 bg-white dark:bg-slate-900 border border-indigo-500 rounded-xl px-2.5 py-1 shrink-0 shadow-sm min-h-[44px]"
+          >
+            <Tag className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+            <input
+              type="text"
+              autoFocus
+              value={newTagInput}
+              onChange={(e) => setNewTagInput(e.target.value)}
+              placeholder="Tag name..."
+              className="w-24 bg-transparent text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none"
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  setIsAddingTag(false);
+                  setNewTagInput('');
+                }
+              }}
+            />
+            <button
+              type="submit"
+              disabled={!newTagInput.trim()}
+              className="p-1.5 rounded-lg bg-indigo-600 disabled:opacity-40 text-white hover:bg-indigo-700 transition"
+              title="Add tag"
+            >
+              <Check className="w-3 h-3" />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setIsAddingTag(false);
+                setNewTagInput('');
+              }}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600"
+              title="Cancel"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </form>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setIsAddingTag(true)}
+            className="px-3 py-2 rounded-xl whitespace-nowrap border border-dashed border-slate-300 dark:border-slate-700 text-slate-500 hover:text-indigo-600 dark:hover:text-indigo-400 hover:border-indigo-400 dark:hover:border-indigo-500 transition-all flex items-center gap-1 touch-manipulation min-h-[44px] text-xs font-medium"
+            title="Create your own tag"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Tag</span>
+          </button>
+        )}
       </div>
 
       {/* Search Input */}
@@ -189,7 +386,7 @@ export const TaskListView: React.FC<TaskListViewProps> = ({
             type="text"
             value={quickInput}
             onChange={(e) => setQuickInput(e.target.value)}
-            placeholder="Add task... (e.g., Team meeting tomorrow 2pm urgent)"
+            placeholder="Add task... (e.g. Prepare presentation tomorrow 2pm #project)"
             className="flex-1 bg-transparent px-2 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none"
           />
 
@@ -216,11 +413,50 @@ export const TaskListView: React.FC<TaskListViewProps> = ({
           </button>
         </div>
 
+        {/* Quick Tag Selector */}
+        <div className="flex items-center gap-1.5 px-2 pt-1 border-t border-slate-100 dark:border-slate-800 text-[11px] overflow-x-auto no-scrollbar">
+          <span className="text-slate-400 flex items-center gap-1 shrink-0 font-medium">
+            <Tag className="w-3 h-3" /> Tag:
+          </span>
+          <button
+            type="button"
+            onClick={() => setSelectedQuickTag('General')}
+            className={`px-2 py-0.5 rounded-lg border text-[11px] transition whitespace-nowrap ${
+              selectedQuickTag === 'General'
+                ? 'bg-slate-800 text-white dark:bg-white dark:text-slate-900 border-transparent font-medium shadow-sm'
+                : 'bg-slate-50 dark:bg-slate-800/60 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:bg-slate-100'
+            }`}
+          >
+            None
+          </button>
+          {allTags.map((tag) => (
+            <button
+              key={tag}
+              type="button"
+              onClick={() => setSelectedQuickTag(tag)}
+              className={`px-2 py-0.5 rounded-lg border text-[11px] transition whitespace-nowrap ${
+                selectedQuickTag.toLowerCase() === tag.toLowerCase()
+                  ? 'bg-indigo-600 text-white border-transparent font-medium shadow-sm'
+                  : 'bg-slate-50 dark:bg-slate-800/60 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:bg-slate-100'
+              }`}
+            >
+              #{tag}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => setIsAddingTag(true)}
+            className="text-indigo-600 dark:text-indigo-400 hover:underline px-1.5 py-0.5 flex items-center gap-0.5 shrink-0"
+          >
+            <Plus className="w-3 h-3" /> New
+          </button>
+        </div>
+
         {/* Real-time NLP parse feedback chip */}
         {parsedPreview && (
           <div className="px-2.5 py-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 text-[11px] text-indigo-700 dark:text-indigo-300 flex items-center justify-between">
             <span className="truncate">
-              Smart Extract: <strong>{parsedPreview.title}</strong> · {parsedPreview.dueDate} {parsedPreview.dueTime ? `at ${parsedPreview.dueTime}` : ''} {parsedPreview.location ? `· ${parsedPreview.location}` : ''} · [{parsedPreview.priority}]
+              Smart Extract: <strong>{parsedPreview.title}</strong> · {parsedPreview.dueDate} {parsedPreview.dueTime ? `at ${parsedPreview.dueTime}` : ''} {parsedPreview.location ? `· ${parsedPreview.location}` : ''} {parsedPreview.category && parsedPreview.category !== 'General' ? `· #${parsedPreview.category}` : ''} · [{parsedPreview.priority}]
             </span>
             <span className="text-[10px] font-semibold text-indigo-600 dark:text-indigo-400 ml-2 shrink-0">
               Ready
@@ -258,73 +494,93 @@ export const TaskListView: React.FC<TaskListViewProps> = ({
                 key={task.id}
                 className={`group bg-white dark:bg-slate-900 border rounded-2xl p-3.5 transition-all shadow-sm ${
                   task.completed
-                    ? 'border-slate-200 dark:border-slate-800 opacity-60'
+                    ? 'border-slate-100 dark:border-slate-800/60 opacity-60'
                     : isOverdue
-                    ? 'border-rose-300 dark:border-rose-900/60 bg-rose-50/20 dark:bg-rose-950/10'
+                    ? 'border-red-200 dark:border-red-900/40 bg-red-50/20 dark:bg-red-950/10'
                     : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
                 }`}
               >
                 <div className="flex items-start gap-3">
-                  {/* Circular Checkbox (Google Tasks Style) */}
+                  {/* Custom Checkbox Button */}
                   <button
+                    type="button"
                     onClick={() => onToggleTask(task.id, task.completed)}
-                    className={`mt-0.5 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all touch-manipulation min-h-[44px] min-w-[44px] ${
+                    className={`mt-0.5 w-6 h-6 rounded-lg flex items-center justify-center transition touch-manipulation min-w-[24px] ${
                       task.completed
-                        ? 'bg-emerald-500 border-emerald-500 text-white'
-                        : 'border-slate-400 hover:border-indigo-600 dark:border-slate-600 text-transparent'
+                        ? 'bg-emerald-500 text-white shadow-sm'
+                        : 'border-2 border-slate-300 dark:border-slate-600 hover:border-indigo-600 text-transparent'
                     }`}
-                    title={task.completed ? 'Mark pending' : 'Mark completed'}
+                    aria-label={task.completed ? 'Mark incomplete' : 'Mark completed'}
                   >
-                    <Check className={`w-3.5 h-3.5 stroke-[3] ${task.completed ? 'text-white' : 'opacity-0'}`} />
+                    <Check className="w-3.5 h-3.5 stroke-[3]" />
                   </button>
 
                   {/* Task Content */}
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={`text-sm font-medium leading-snug break-words ${
+                    <div className="flex items-center justify-between gap-2">
+                      <h4
+                        className={`text-sm font-semibold truncate ${
                           task.completed
                             ? 'line-through text-slate-400 dark:text-slate-500'
-                            : 'text-slate-900 dark:text-slate-100'
+                            : 'text-slate-900 dark:text-white'
                         }`}
                       >
                         {task.title}
-                      </span>
+                      </h4>
 
-                      {/* Priority Flag */}
-                      {task.priority === 'high' && (
-                        <span className="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300">
-                          High
-                        </span>
-                      )}
+                      {/* Action buttons (Edit, Delete) */}
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button
+                          type="button"
+                          onClick={() => setEditingTask(task)}
+                          className="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                          title="Edit Task"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onDeleteTask(task.id)}
+                          className="p-1 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 transition"
+                          title="Delete Task"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
 
-                    {/* Description Notes */}
+                    {/* Description */}
                     {task.description && (
-                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 line-clamp-2">
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-2">
                         {task.description}
                       </p>
                     )}
 
-                    {/* Metadata details: Date, Time, Location, Category (Zero-Pill discipline) */}
-                    <div className="flex flex-wrap items-center gap-2 mt-2 text-xs text-slate-500 dark:text-slate-400">
-                      {/* Date */}
-                      <span className={`inline-flex items-center gap-1 ${
-                        isOverdue ? 'text-rose-600 font-semibold' : isDueToday ? 'text-indigo-600 dark:text-indigo-400 font-medium' : ''
-                      }`}>
+                    {/* Metadata Badges & Custom Tag */}
+                    <div className="flex flex-wrap items-center gap-2 mt-2 text-xs">
+                      {/* Due Date & Time */}
+                      <span
+                        className={`inline-flex items-center gap-1 font-medium ${
+                          isOverdue
+                            ? 'text-red-600 dark:text-red-400'
+                            : isDueToday
+                            ? 'text-indigo-600 dark:text-indigo-400 font-semibold'
+                            : 'text-slate-500 dark:text-slate-400'
+                        }`}
+                      >
                         <Calendar className="w-3.5 h-3.5" />
-                        <span>{isDueToday ? 'Today' : task.dueDate}</span>
+                        <span>
+                          {isDueToday ? 'Today' : task.dueDate}
+                          {task.dueTime ? ` at ${task.dueTime}` : ''}
+                        </span>
                       </span>
 
-                      {/* Time */}
-                      {task.dueTime && (
-                        <>
-                          <span aria-hidden="true" className="text-slate-300 dark:text-slate-700">·</span>
-                          <span className="inline-flex items-center gap-1 font-mono">
-                            <Clock className="w-3.5 h-3.5" />
-                            <span>{task.dueTime}</span>
-                          </span>
-                        </>
+                      {/* Priority */}
+                      {task.priority === 'high' && (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-red-100 dark:bg-red-950/50 text-red-600 dark:text-red-400">
+                          <AlertCircle className="w-3 h-3" />
+                          <span>High</span>
+                        </span>
                       )}
 
                       {/* Location */}
@@ -338,9 +594,24 @@ export const TaskListView: React.FC<TaskListViewProps> = ({
                         </>
                       )}
 
-                      {/* Category */}
-                      <span aria-hidden="true" className="text-slate-300 dark:text-slate-700">·</span>
-                      <span className="text-[11px] text-slate-400">{task.category}</span>
+                      {/* User Custom Tag */}
+                      {task.category && task.category !== 'General' && !legacyPresets.has(task.category.toLowerCase()) && (
+                        <>
+                          <span aria-hidden="true" className="text-slate-300 dark:text-slate-700">·</span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setActiveCategory(task.category);
+                            }}
+                            className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900 transition"
+                            title={`Filter by tag #${task.category}`}
+                          >
+                            <Tag className="w-2.5 h-2.5" />
+                            <span>#{task.category}</span>
+                          </button>
+                        </>
+                      )}
                     </div>
 
                     {/* Subtasks Progress / Expander */}
@@ -362,45 +633,20 @@ export const TaskListView: React.FC<TaskListViewProps> = ({
                                   type="checkbox"
                                   checked={sub.completed}
                                   onChange={() => {
-                                    if (!sub.completed) {
-                                      hapticService.taskComplete();
-                                    } else {
-                                      hapticService.taskUncheck();
-                                    }
-                                    const updated = task.subtasks?.map((s) =>
+                                    const updated = (task.subtasks || []).map((s) =>
                                       s.id === sub.id ? { ...s, completed: !s.completed } : s
                                     );
                                     onUpdateTask(task.id, { subtasks: updated });
                                   }}
-                                  className="rounded text-indigo-600 focus:ring-0"
+                                  className="w-3.5 h-3.5 rounded text-indigo-600"
                                 />
-                                <span className={sub.completed ? 'line-through text-slate-400' : ''}>
-                                  {sub.title}
-                                </span>
+                                <span className={sub.completed ? 'line-through text-slate-400' : ''}>{sub.title}</span>
                               </label>
                             ))}
                           </div>
                         )}
                       </div>
                     )}
-                  </div>
-
-                  {/* Actions: Edit & Delete */}
-                  <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
-                    <button
-                      onClick={() => setEditingTask(task)}
-                      className="p-1.5 text-slate-400 hover:text-indigo-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition min-h-[44px] min-w-[44px] flex items-center justify-center"
-                      title="Edit task"
-                    >
-                      <Edit3 className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => onDeleteTask(task.id)}
-                      className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition min-h-[44px] min-w-[44px] flex items-center justify-center"
-                      title="Delete task"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
                   </div>
                 </div>
               </div>
@@ -411,9 +657,21 @@ export const TaskListView: React.FC<TaskListViewProps> = ({
 
       {/* Edit Task Modal */}
       {editingTask && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in">
-          <div className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-2xl space-y-4">
-            <h3 className="text-base font-bold text-slate-900 dark:text-white">Edit Task</h3>
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-md w-full p-5 shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-1.5">
+                <Edit3 className="w-4 h-4 text-indigo-600" />
+                <span>Edit Task</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setEditingTask(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+              >
+                ✕
+              </button>
+            </div>
 
             <div className="space-y-3">
               <div>
@@ -422,18 +680,17 @@ export const TaskListView: React.FC<TaskListViewProps> = ({
                   type="text"
                   value={editingTask.title}
                   onChange={(e) => setEditingTask({ ...editingTask, title: e.target.value })}
-                  className="w-full mt-1 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  className="w-full mt-1 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 />
               </div>
 
               <div>
-                <label className="text-xs font-semibold text-slate-500">Notes / Details</label>
+                <label className="text-xs font-semibold text-slate-500">Description</label>
                 <textarea
                   rows={2}
                   value={editingTask.description || ''}
                   onChange={(e) => setEditingTask({ ...editingTask, description: e.target.value })}
-                  className="w-full mt-1 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                  placeholder="Optional details..."
+                  className="w-full mt-1 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 />
               </div>
 
@@ -460,19 +717,87 @@ export const TaskListView: React.FC<TaskListViewProps> = ({
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="text-xs font-semibold text-slate-500">Category</label>
-                  <select
-                    value={editingTask.category}
-                    onChange={(e) => setEditingTask({ ...editingTask, category: e.target.value as TaskCategory })}
-                    className="w-full mt-1 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 text-xs text-slate-900 dark:text-white focus:outline-none"
-                  >
-                    <option value="Personal">Personal</option>
-                    <option value="Work">Work</option>
-                    <option value="Urgent">Urgent</option>
-                    <option value="Health">Health</option>
-                    <option value="Errands">Errands</option>
-                  </select>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-semibold text-slate-500">Tag</label>
+                    {!isCreatingModalTag && (
+                      <button
+                        type="button"
+                        onClick={() => setIsCreatingModalTag(true)}
+                        className="text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-0.5"
+                      >
+                        <Plus className="w-3 h-3" /> New
+                      </button>
+                    )}
+                  </div>
+                  {isCreatingModalTag ? (
+                    <div className="flex items-center gap-1.5 mt-1">
+                      <input
+                        type="text"
+                        autoFocus
+                        value={newModalTagName}
+                        onChange={(e) => setNewModalTagName(e.target.value)}
+                        placeholder="Tag name..."
+                        className="flex-1 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 text-xs text-slate-900 dark:text-white focus:outline-none"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            const tag = newModalTagName.trim().replace(/^#/, '');
+                            if (tag) {
+                              handleCreateTag(tag);
+                              setEditingTask({ ...editingTask, category: tag });
+                              setNewModalTagName('');
+                              setIsCreatingModalTag(false);
+                            }
+                          }
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const tag = newModalTagName.trim().replace(/^#/, '');
+                          if (tag) {
+                            handleCreateTag(tag);
+                            setEditingTask({ ...editingTask, category: tag });
+                            setNewModalTagName('');
+                          }
+                          setIsCreatingModalTag(false);
+                        }}
+                        className="px-2 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-medium"
+                      >
+                        Add
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNewModalTagName('');
+                          setIsCreatingModalTag(false);
+                        }}
+                        className="px-2 py-1.5 rounded-lg text-slate-400 hover:text-slate-600 text-xs"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <select
+                      value={editingTask.category && !legacyPresets.has(editingTask.category.toLowerCase()) ? editingTask.category : 'General'}
+                      onChange={(e) => {
+                        if (e.target.value === '__NEW__') {
+                          setIsCreatingModalTag(true);
+                        } else {
+                          setEditingTask({ ...editingTask, category: e.target.value });
+                        }
+                      }}
+                      className="w-full mt-1 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 text-xs text-slate-900 dark:text-white focus:outline-none"
+                    >
+                      <option value="General">No Tag</option>
+                      {allTags.map((tag) => (
+                        <option key={tag} value={tag}>#{tag}</option>
+                      ))}
+                      <option value="__NEW__">+ Create new tag...</option>
+                    </select>
+                  )}
                 </div>
+
                 <div>
                   <label className="text-xs font-semibold text-slate-500">Priority</label>
                   <select

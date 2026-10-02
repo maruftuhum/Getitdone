@@ -1,9 +1,9 @@
 import type { Request, Response, NextFunction } from 'express';
 import { rateLimit } from 'express-rate-limit';
 import { z } from 'zod';
-import { verifyToken } from './firebaseAdmin';
-import { taskSchema, timeSchema } from '../src/shared/taskActions';
-import { isTimeZone } from '../src/shared/dates';
+import { verifyToken } from './firebaseAdmin.ts';
+import { taskSchema, timeSchema } from '../src/shared/taskActions.ts';
+import { isTimeZone } from '../src/shared/dates.ts';
 
 export const timeZoneSchema = z.string().max(100).refine(isTimeZone);
 export const alarmSchema = z.object({ id: z.string().regex(/^[\w-]{1,128}$/), label: z.string().trim().min(1).max(200), time: timeSchema, enabled: z.boolean(), callType: z.enum(['morning_brief', 'afternoon_check', 'evening_recap', 'custom_alarm']) });

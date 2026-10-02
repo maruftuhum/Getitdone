@@ -1,7 +1,7 @@
 import { test, after, before } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Server } from 'node:http';
-import { createApp } from '../server/app';
+import { createApp } from '../server/app.ts';
 let server: Server;
 let url: string;
 before(async () => {

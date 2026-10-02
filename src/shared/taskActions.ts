@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import type { Task } from '../types';
-import { isCalendarDate } from './dates';
+import type { Task } from '../types/index.ts';
+import { isCalendarDate } from './dates.ts';
 
 export const dateSchema = z.string().refine(isCalendarDate, 'Invalid calendar date');
 export const timeSchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
@@ -10,7 +10,7 @@ export const taskFields = z.object({
   dueTime: timeSchema.nullable().optional(),
   location: z.string().trim().max(500).nullable().optional(),
   description: z.string().max(2000).optional(),
-  category: z.enum(['Personal', 'Work', 'Urgent', 'Health', 'Errands']),
+  category: z.string().trim().min(1).max(50),
   priority: z.enum(['low', 'medium', 'high']),
 });
 export const taskSchema = taskFields.extend({

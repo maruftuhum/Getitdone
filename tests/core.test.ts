@@ -1,14 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { executeTaskAction, taskActionSchema } from '../src/shared/taskActions';
-import { localDate, zonedClock, isCalendarDate } from '../src/shared/dates';
-import { dueReminders } from '../src/shared/reminders';
-import { parseTaskLocally } from '../src/services/localNlpParser';
-import { localTaskCommand } from '../src/services/localTaskCommands';
-import { loadTaskCache, mergeCloudTasks, taskCacheKey } from '../src/services/taskStorage';
-import { audioBlob } from '../src/shared/audio';
-import { validPushEndpoint } from '../server/push';
-import type { Task, ScheduledCallAlarm } from '../src/types';
+import { executeTaskAction, taskActionSchema } from '../src/shared/taskActions.ts';
+import { localDate, zonedClock, isCalendarDate } from '../src/shared/dates.ts';
+import { dueReminders } from '../src/shared/reminders.ts';
+import { parseTaskLocally } from '../src/services/localNlpParser.ts';
+import { localTaskCommand } from '../src/services/localTaskCommands.ts';
+import { loadTaskCache, mergeCloudTasks, taskCacheKey } from '../src/services/taskStorage.ts';
+import { audioBlob } from '../src/shared/audio.ts';
+import { validPushEndpoint } from '../server/push.ts';
+import type { Task, ScheduledCallAlarm } from '../src/types/index.ts';
 
 const task: Task = { id: 'target', userId: 'alice', title: 'Dentist appointment', dueDate: '2026-10-02', dueTime: '09:00', category: 'Health', priority: 'high', completed: false, createdAt: '2026-10-01T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z' };
 const other = { ...task, id: 'other', title: 'Team meeting' };
