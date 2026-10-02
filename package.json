@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build && esbuild server.ts --bundle --platform=node --format=esm --packages=external --outfile=server.js",
+    "build": "vite build && esbuild server.ts --bundle --platform=node --format=esm --packages=external --outfile=server.js && esbuild server/apiHandler.ts --bundle --platform=node --format=esm --packages=external --outfile=api/index.js",
     "start": "node server.js",
     "test": "tsx --test tests/*.test.ts",
     "push:keys": "web-push generate-vapid-keys",
@@ -43,6 +43,9 @@
     "@grpc/grpc-js": "^1.14.5",
     "gaxios": {
       "uuid": "^11.1.1"
+    },
+    "jwks-rsa": {
+      "jose": "4.15.9"
     }
   },
   "engines": {

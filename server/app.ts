@@ -1,7 +1,7 @@
 import express, { type Request, type Response, type NextFunction } from 'express';
-import { apiLimiter, requireAuth } from './security.ts';
-import { createAiRouter } from './aiApi.ts';
-import { createPushRouter, pushConfig } from './push.ts';
+import { apiLimiter, requireAuth } from './security';
+import { createAiRouter } from './aiApi';
+import { createPushRouter, pushConfig } from './push';
 
 export function createApp(verify?: (token: string) => Promise<string>) {
   const app = express();

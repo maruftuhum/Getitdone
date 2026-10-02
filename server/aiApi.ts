@@ -1,9 +1,9 @@
 import express from 'express';
 import { GoogleGenAI } from '@google/genai';
-import { taskActionSchema, taskFields } from '../src/shared/taskActions.ts';
-import { zonedClock } from '../src/shared/dates.ts';
-import { routeSchemas, validate } from './security.ts';
-import type { Task } from '../src/types/index.ts';
+import { taskActionSchema, taskFields } from '../src/shared/taskActions';
+import { zonedClock } from '../src/shared/dates';
+import { routeSchemas, validate } from './security';
+import type { Task } from '../src/types';
 
 export function createAiRouter() {
   const router = express.Router();

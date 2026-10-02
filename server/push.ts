@@ -2,10 +2,10 @@ import express from 'express';
 import { createHash, randomUUID } from 'node:crypto';
 import webpush from 'web-push';
 import { z } from 'zod';
-import { adminDatabase } from './firebaseAdmin.ts';
-import { alarmSchema, timeZoneSchema, validate } from './security.ts';
-import { dueReminders } from '../src/shared/reminders.ts';
-import type { Task } from '../src/types/index.ts';
+import { adminDatabase } from './firebaseAdmin';
+import { alarmSchema, timeZoneSchema, validate } from './security';
+import { dueReminders } from '../src/shared/reminders';
+import type { Task } from '../src/types';
 
 export function validPushEndpoint(value: string) {
   try {
