@@ -66,9 +66,16 @@ test('queries containing tomorrow or urgent never create tasks', () => {
 });
 test('local commands create, complete, delete and reschedule specific tasks', () => {
   assert.equal(localTaskCommand('Add buy groceries tomorrow at 5pm', [])?.action?.action, 'CREATE_TASK');
+  assert.equal(localTaskCommand('Please add buy milk tomorrow', [])?.action?.action, 'CREATE_TASK');
+  assert.equal(localTaskCommand('Can you remind me to call Mom tonight?', [])?.action?.action, 'CREATE_TASK');
+  assert.equal(localTaskCommand('Put doctor appointment on my calendar', [])?.action?.action, 'CREATE_TASK');
   assert.deepEqual(localTaskCommand('Complete Dentist appointment', [other, task])?.action, { action: 'COMPLETE_TASK', taskId: 'target' });
+  assert.deepEqual(localTaskCommand('Done with Dentist appointment', [other, task])?.action, { action: 'COMPLETE_TASK', taskId: 'target' });
+  assert.deepEqual(localTaskCommand('Mark Dentist appointment as completed', [other, task])?.action, { action: 'COMPLETE_TASK', taskId: 'target' });
   assert.deepEqual(localTaskCommand('Delete Dentist appointment', [other, task])?.action, { action: 'DELETE_TASK', taskId: 'target' });
+  assert.deepEqual(localTaskCommand('Can you remove the dentist appointment please', [other, task])?.action, { action: 'DELETE_TASK', taskId: 'target' });
   assert.equal(localTaskCommand('Reschedule Dentist appointment to tomorrow at 4pm', [other, task])?.action?.action, 'UPDATE_TASK');
+  assert.equal(localTaskCommand('Move Dentist appointment to tomorrow', [other, task])?.action?.action, 'UPDATE_TASK');
   assert.equal(localTaskCommand('Complete the task', [other, task])?.action, undefined);
   assert.equal(localTaskCommand('Delete Dentist appointment', [task, { ...task, id: 'duplicate' }])?.action, undefined);
 });

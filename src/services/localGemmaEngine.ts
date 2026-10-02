@@ -222,7 +222,15 @@ Instructions: Keep answers concise, helpful, and directly actionable for their s
       };
     }
 
-    if (/thank|thanks|great job|appreciate it/i.test(input) || /ধন্যবাদ/.test(input)) {
+    if (/what can you do|how can you help|features/i.test(input) || /কী করতে পারো|কি করতে পারো/.test(input)) {
+      return {
+        reply: "You can talk to me just like a human assistant! Tell me to add tasks, mark things done, reschedule items, or ask what's coming up next on your schedule.",
+        isNativeOnDevice: true,
+        engineUsed: 'Natural Assistant Engine',
+      };
+    }
+
+    if (/thank|thanks|great job|appreciate it|awesome|perfect/i.test(input) || /ধন্যবাদ|থ্যাংকস/.test(input)) {
       return {
         reply: "You're very welcome! I'm always right here whenever you need me.",
         isNativeOnDevice: true,
@@ -230,7 +238,15 @@ Instructions: Keep answers concise, helpful, and directly actionable for their s
       };
     }
 
-    if (/stress|overwhelm|exhaust|tired|too much|help me/i.test(input)) {
+    if (/bye|goodbye|talk later|hang up|see ya|see you/i.test(input) || /বিদায়|বাই|পরে কথা হবে/.test(input)) {
+      return {
+        reply: "Take care and have a wonderful day! Call me whenever you're ready to get things done.",
+        isNativeOnDevice: true,
+        engineUsed: 'Natural Assistant Engine',
+      };
+    }
+
+    if (/stress|overwhelm|exhaust|tired|too much|help me/i.test(input) || /ক্লান্ত|প্যারা|অনেক চাপ/.test(input)) {
       return {
         reply: "Take a deep breath — I've got your back. We don't have to tackle everything at once. Let's focus on just the single most important task right now, or push non-urgent items to tomorrow. What feels most critical?",
         isNativeOnDevice: true,
@@ -238,9 +254,46 @@ Instructions: Keep answers concise, helpful, and directly actionable for their s
       };
     }
 
-    if (input.includes('tomorrow')) {
-      const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
-      const list = pendingTasks.filter(t => t.dueDate === localDate(tomorrow));
+    // Query: What's next / What should I do now?
+    if (/what('?s| is) next|what should i do|what to do next|first task|top task/i.test(input) || /পরের কাজ|এখন কি করব/.test(input)) {
+      const nextTask = urgentTasks[0] || todayTasks[0] || pendingTasks[0];
+      if (!nextTask) {
+        return {
+          reply: "You have zero pending tasks! You're completely caught up. What would you like to plan next?",
+          isNativeOnDevice: true,
+          engineUsed: 'Natural Assistant Engine',
+        };
+      }
+      return {
+        reply: `Next up is "${nextTask.title}"${nextTask.dueTime ? ' at ' + nextTask.dueTime : ''}. Let me know once you finish it!`,
+        isNativeOnDevice: true,
+        engineUsed: 'Natural Assistant Engine',
+      };
+    }
+
+    // Query: Completed tasks
+    if (/completed|finished tasks|what did i do|what did i finish/i.test(input) || /শেষ করেছি|কমপ্লিট করেছি/.test(input)) {
+      const completedList = tasks.filter((t) => t.completed);
+      if (completedList.length === 0) {
+        return {
+          reply: "You haven't checked off any tasks yet today. Pick one from your list and let's get the momentum started!",
+          isNativeOnDevice: true,
+          engineUsed: 'Natural Assistant Engine',
+        };
+      }
+      const recent = completedList.slice(0, 3).map((t) => t.title).join(', ');
+      return {
+        reply: `You've checked off ${completedList.length} ${completedList.length === 1 ? 'task' : 'tasks'} so far, including: ${recent}. Excellent job!`,
+        isNativeOnDevice: true,
+        engineUsed: 'Natural Assistant Engine',
+      };
+    }
+
+    // Query: Tomorrow's tasks
+    if (input.includes('tomorrow') || input.includes('কাল') || input.includes('আগামীকাল')) {
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const list = pendingTasks.filter((t) => t.dueDate === localDate(tomorrow));
       if (!list.length) {
         return {
           reply: "Your schedule for tomorrow is completely clear! A blank slate. Would you like to add anything?",
@@ -248,7 +301,7 @@ Instructions: Keep answers concise, helpful, and directly actionable for their s
           engineUsed: 'Natural Assistant Engine',
         };
       }
-      const summary = list.map(t => `${t.title}${t.dueTime ? ' at ' + t.dueTime : ''}`).join(', and ');
+      const summary = list.map((t) => `${t.title}${t.dueTime ? ' at ' + t.dueTime : ''}`).join(', and ');
       return {
         reply: `Tomorrow you have ${list.length} ${list.length === 1 ? 'task' : 'tasks'} scheduled: ${summary}. Anything you want to adjust?`,
         isNativeOnDevice: true,
@@ -256,8 +309,17 @@ Instructions: Keep answers concise, helpful, and directly actionable for their s
       };
     }
 
-    // B. Query: What's due today?
-    if (input.includes('today') || input.includes('what is due') || input.includes('schedule') || input.includes('agenda') || input.includes('what do i have')) {
+    // Query: What's due today / schedule review
+    if (
+      input.includes('today') ||
+      input.includes('what is due') ||
+      input.includes('schedule') ||
+      input.includes('agenda') ||
+      input.includes('what do i have') ||
+      input.includes('my tasks') ||
+      input.includes('আজকে') ||
+      input.includes('আজকের কাজ')
+    ) {
       if (todayTasks.length === 0) {
         return {
           reply: "You have no tasks scheduled for today! Your day is wide open. Want to plan something new, or enjoy the free time?",
@@ -265,7 +327,7 @@ Instructions: Keep answers concise, helpful, and directly actionable for their s
           engineUsed: 'Natural Assistant Engine',
         };
       }
-      const summary = todayTasks.map(t => `${t.title}${t.dueTime ? ' at ' + t.dueTime : ''}`).join(', and ');
+      const summary = todayTasks.map((t) => `${t.title}${t.dueTime ? ' at ' + t.dueTime : ''}`).join(', and ');
       return {
         reply: `Today you have ${todayTasks.length} ${todayTasks.length === 1 ? 'task' : 'tasks'}: ${summary}. What would you like to start with?`,
         isNativeOnDevice: true,
@@ -273,8 +335,8 @@ Instructions: Keep answers concise, helpful, and directly actionable for their s
       };
     }
 
-    // C. Query: Priority / Urgent tasks
-    if (input.includes('urgent') || input.includes('priority') || input.includes('important')) {
+    // Query: Priority / Urgent tasks
+    if (input.includes('urgent') || input.includes('priority') || input.includes('important') || input.includes('জরুরি')) {
       if (urgentTasks.length === 0) {
         return {
           reply: "Good news! You don't have any urgent or high-priority fires to put out right now. Everything is running smoothly.",
@@ -290,7 +352,7 @@ Instructions: Keep answers concise, helpful, and directly actionable for their s
       };
     }
 
-    // D. Progress summary
+    // Progress summary
     if (input.includes('progress') || input.includes('how am i doing') || input.includes('stats')) {
       const completedCount = tasks.filter((t) => t.completed).length;
       const total = tasks.length;
@@ -302,9 +364,9 @@ Instructions: Keep answers concise, helpful, and directly actionable for their s
       };
     }
 
-    // E. General Assistant Guidance
+    // General Assistant Guidance
     return {
-      reply: `I'm here! I'm keeping track of all ${pendingTasks.length} of your tasks. Feel free to ask what's due, tell me to reschedule, mark something done, or add a new to-do.`,
+      reply: `I'm right here! You have ${pendingTasks.length} ${pendingTasks.length === 1 ? 'task' : 'tasks'} on your radar. Tell me what you'd like to add, mark done, or check!`,
       isNativeOnDevice: true,
       engineUsed: 'Natural Assistant Engine',
     };

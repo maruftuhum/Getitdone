@@ -4,7 +4,6 @@ import {
   PhoneOff, 
   Mic, 
   MicOff, 
-  Volume2, 
   Sparkles, 
   Check, 
   Clock, 
@@ -15,7 +14,9 @@ import {
   Trash2,
   Calendar,
   Zap,
-  Bot
+  Bot,
+  Send,
+  Radio
 } from 'lucide-react';
 import { ActiveCallState, Task, CallType } from '../types';
 import { audioService } from '../services/audioService';
@@ -68,15 +69,20 @@ export const AICallModal: React.FC<AICallModalProps> = ({
   const [userSpeechInput, setUserSpeechInput] = useState('');
   const [callStatusMessage, setCallStatusMessage] = useState('Connecting with Aria...');
   const [isPreloaded, setIsPreloaded] = useState(false);
-  
+  const [isProcessingTurn, setIsProcessingTurn] = useState(false);
+
+  // Live Audio Spectrum & Volume from Web Audio API Analyser
+  const [audioVolume, setAudioVolume] = useState<number>(0);
+  const [frequencyData, setFrequencyData] = useState<number[]>([18, 25, 32, 28, 40, 30, 22, 18, 15]);
+
   // Interactive Call & Multi-language States
   const [callLanguage, setCallLanguage] = useState<'en-US' | 'bn-BD'>('en-US');
   const [conversationHistory, setConversationHistory] = useState<
     Array<{ role: 'user' | 'assistant'; content: string }>
   >([]);
   const [actionNotice, setActionNotice] = useState<{ type: 'create' | 'update' | 'complete' | 'delete'; text: string } | null>(null);
-  const [isProcessingTurn, setIsProcessingTurn] = useState(false);
 
+  // Refs for precise synchronous state management (prevents race conditions and echo loops)
   const timerRef = useRef<number | null>(null);
   const recognitionRef = useRef<any>(null);
   const speechTranscriptRef = useRef<string>('');
@@ -88,6 +94,13 @@ export const AICallModal: React.FC<AICallModalProps> = ({
   const callStateRef = useRef(callState);
   const silenceTimerRef = useRef<any>(null);
   const autoRestartTimerRef = useRef<any>(null);
+  const lastAiSpeechEndTimeRef = useRef<number>(0);
+
+  // Web Audio Analyser Refs
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const rafIdRef = useRef<number | null>(null);
 
   useEffect(() => {
     tasksRef.current = tasks;
@@ -126,10 +139,113 @@ export const AICallModal: React.FC<AICallModalProps> = ({
     setIsUserListening(false);
   };
 
+  // Start Real-Time Web Audio Analyser (Live Voice Frequency & Energy)
+  const startAudioAnalyser = async () => {
+    try {
+      if (micStreamRef.current) return;
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: { 
+          echoCancellation: true, 
+          noiseSuppression: true, 
+          autoGainControl: true 
+        } 
+      });
+      micStreamRef.current = stream;
+
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!audioCtxRef.current && AudioCtx) {
+        audioCtxRef.current = new AudioCtx();
+      }
+      if (audioCtxRef.current?.state === 'suspended') {
+        await audioCtxRef.current.resume();
+      }
+
+      if (audioCtxRef.current) {
+        const source = audioCtxRef.current.createMediaStreamSource(stream);
+        const analyser = audioCtxRef.current.createAnalyser();
+        analyser.fftSize = 64;
+        analyser.smoothingTimeConstant = 0.8;
+        source.connect(analyser);
+        analyserRef.current = analyser;
+
+        const bufferLength = analyser.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+        let bargeInConsecutiveFrames = 0;
+
+        const updateMeter = () => {
+          if (!analyserRef.current) return;
+          analyserRef.current.getByteFrequencyData(dataArray);
+
+          // Calculate RMS volume level
+          let sum = 0;
+          for (let i = 0; i < bufferLength; i++) {
+            sum += dataArray[i];
+          }
+          const avg = sum / bufferLength;
+          const normalizedVol = Math.min(100, Math.round((avg / 128) * 100));
+          setAudioVolume(normalizedVol);
+
+          // Sample 9 harmonic frequency bands for visualizer bars
+          const bands: number[] = [];
+          const step = Math.floor(bufferLength / 9) || 1;
+          for (let i = 0; i < 9; i++) {
+            const val = dataArray[i * step] || 0;
+            bands.push(Math.max(15, Math.min(100, Math.round((val / 255) * 100))));
+          }
+          setFrequencyData(bands);
+
+          // True Gemini Live Voice-Activated Barge-In:
+          // If Aria is speaking and user starts talking, detect volume spike and yield immediately
+          if (isAiSpeakingRef.current && normalizedVol > 24) {
+            bargeInConsecutiveFrames++;
+            if (bargeInConsecutiveFrames >= 3) {
+              bargeInConsecutiveFrames = 0;
+              handleVoiceBargeIn();
+            }
+          } else {
+            bargeInConsecutiveFrames = 0;
+          }
+
+          rafIdRef.current = requestAnimationFrame(updateMeter);
+        };
+
+        rafIdRef.current = requestAnimationFrame(updateMeter);
+      }
+    } catch (e) {
+      console.warn('Microphone stream access not granted for visualizer:', e);
+    }
+  };
+
+  const stopAudioAnalyser = () => {
+    if (rafIdRef.current) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
+    if (micStreamRef.current) {
+      micStreamRef.current.getTracks().forEach((t) => t.stop());
+      micStreamRef.current = null;
+    }
+    analyserRef.current = null;
+    setAudioVolume(0);
+  };
+
+  // Immediate Voice Barge-In: interrupt Aria mid-sentence
+  const handleVoiceBargeIn = () => {
+    audioService.stopSpeaking();
+    isAiSpeakingRef.current = false;
+    setIsAiSpeaking(false);
+    isMutedRef.current = false;
+    setIsMuted(false);
+    hapticService.lightTap();
+    setCallStatusMessage(callLanguage === 'bn-BD' ? 'শুনছি... বলুন' : "Listening... I'm right here");
+    startAutoListening();
+  };
+
   useEffect(() => {
     return () => {
       turnController.current?.abort();
       stopListening();
+      stopAudioAnalyser();
       audioService.stopSpeaking();
     };
   }, []);
@@ -141,11 +257,13 @@ export const AICallModal: React.FC<AICallModalProps> = ({
       setCallDuration(0);
       setIsMuted(false);
       isMutedRef.current = false;
+      startAudioAnalyser();
       timerRef.current = window.setInterval(() => {
         setCallDuration((prev) => prev + 1);
       }, 1000);
     } else {
       stopListening();
+      stopAudioAnalyser();
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
@@ -161,7 +279,7 @@ export const AICallModal: React.FC<AICallModalProps> = ({
     };
   }, [callState]);
 
-  // Pre-load what Aria will say before the user picks up
+  // Pre-load what Aria will say before the user answers
   useEffect(() => {
     if (callState === 'ringing') {
       setIsPreloaded(false);
@@ -223,6 +341,16 @@ export const AICallModal: React.FC<AICallModalProps> = ({
       };
 
       recognition.onresult = (event: any) => {
+        // Echo isolation: if Aria just finished speaking within 180ms, ignore residual speaker echo
+        if (Date.now() - lastAiSpeechEndTimeRef.current < 180) {
+          return;
+        }
+
+        // If Aria is speaking and speech recognized, trigger barge-in!
+        if (isAiSpeakingRef.current) {
+          handleVoiceBargeIn();
+        }
+
         let interim = '';
         let final = '';
         for (let i = 0; i < event.results.length; i++) {
@@ -247,26 +375,28 @@ export const AICallModal: React.FC<AICallModalProps> = ({
           clearTimeout(silenceTimerRef.current);
         }
 
-        // When user pauses speaking for 950ms, send turn smoothly
+        // Gemini Live-grade Snappy Turnaround:
+        // If utterance is a complete phrase or question, 380ms; standard pause: 480ms
+        const isCompleteThought = /[.?!]$/.test(combined) || combined.split(/\s+/).length >= 4;
+        const silenceDelay = isCompleteThought ? 380 : 480;
+
         if (combined.length > 0) {
           silenceTimerRef.current = setTimeout(() => {
             const textToSend = speechTranscriptRef.current.trim();
-            if (textToSend && !isProcessingTurnRef.current) {
+            if (textToSend && !isProcessingTurnRef.current && !isAiSpeakingRef.current) {
               stopListening();
               speechTranscriptRef.current = '';
               setCallStatusMessage(
-                callLanguage === 'bn-BD'
-                  ? 'ভাবছি...'
-                  : 'Aria is thinking...'
+                callLanguage === 'bn-BD' ? 'ভাবছি...' : 'Aria is thinking...'
               );
               handleConversationalVoiceTurn(textToSend);
             }
-          }, 950);
+          }, silenceDelay);
         }
       };
 
       recognition.onerror = (event: any) => {
-        if (event.error !== 'no-speech') {
+        if (event.error !== 'no-speech' && event.error !== 'aborted') {
           console.warn('Speech recognition notice:', event.error);
         }
       };
@@ -280,9 +410,7 @@ export const AICallModal: React.FC<AICallModalProps> = ({
         if (pendingText && !isProcessingTurnRef.current && !isAiSpeakingRef.current) {
           speechTranscriptRef.current = '';
           setCallStatusMessage(
-            callLanguage === 'bn-BD'
-              ? 'ভাবছি...'
-              : 'Aria is thinking...'
+            callLanguage === 'bn-BD' ? 'ভাবছি...' : 'Aria is thinking...'
           );
           handleConversationalVoiceTurn(pendingText);
           return;
@@ -297,7 +425,7 @@ export const AICallModal: React.FC<AICallModalProps> = ({
         ) {
           autoRestartTimerRef.current = setTimeout(() => {
             startAutoListening();
-          }, 200);
+          }, 150);
         }
       };
 
@@ -327,7 +455,7 @@ export const AICallModal: React.FC<AICallModalProps> = ({
         const timeoutPromise = new Promise<{ script: string }>((resolve) =>
           setTimeout(
             () => resolve({ script: voiceCallService.getInstantFallbackScript(tasks, userName) }),
-            400
+            350
           )
         );
         const result = await Promise.race([prepPromise, timeoutPromise]);
@@ -341,22 +469,32 @@ export const AICallModal: React.FC<AICallModalProps> = ({
 
     setConversationHistory([{ role: 'assistant', content: scriptToSpeak }]);
 
+    const onSpeechStart = () => {
+      isAiSpeakingRef.current = true;
+      setIsAiSpeaking(true);
+      stopListening();
+    };
+
+    const onSpeechEnd = () => {
+      isAiSpeakingRef.current = false;
+      setIsAiSpeaking(false);
+      lastAiSpeechEndTimeRef.current = Date.now();
+      setCallStatusMessage(
+        callLanguage === 'bn-BD'
+          ? 'শুনছি... কথা বলুন'
+          : 'Listening... speak freely'
+      );
+      // Guard delay (180ms) before re-arming speech recognition prevents speaker feedback
+      setTimeout(() => {
+        startAutoListening();
+      }, 180);
+    };
+
     await audioService.playPreloadedOrSpeak(
       scriptToSpeak,
       voiceName,
-      () => {
-        setIsAiSpeaking(true);
-        stopListening();
-      },
-      () => {
-        setIsAiSpeaking(false);
-        setCallStatusMessage(
-          callLanguage === 'bn-BD'
-            ? 'শুনছি... কথা বলুন'
-            : 'Listening... speak freely'
-        );
-        startAutoListening();
-      }
+      onSpeechStart,
+      onSpeechEnd
     );
   };
 
@@ -366,13 +504,7 @@ export const AICallModal: React.FC<AICallModalProps> = ({
 
     // If Aria is speaking, tapping mic interrupts her immediately and opens mic!
     if (isAiSpeaking) {
-      audioService.stopSpeaking();
-      setIsAiSpeaking(false);
-      setIsMuted(false);
-      isMutedRef.current = false;
-      setUserSpeechInput('');
-      setCallStatusMessage(callLanguage === 'bn-BD' ? 'বলুন, শুনছি...' : "Go ahead, I'm listening...");
-      startAutoListening();
+      handleVoiceBargeIn();
       return;
     }
 
@@ -395,7 +527,8 @@ export const AICallModal: React.FC<AICallModalProps> = ({
 
   // Conversational Multi-turn Voice Turn
   const handleConversationalVoiceTurn = async (spokenText: string) => {
-    if (!spokenText.trim() || isProcessingTurn) return;
+    if (!spokenText.trim() || isProcessingTurnRef.current) return;
+    isProcessingTurnRef.current = true;
     setIsProcessingTurn(true);
     stopListening();
     setUserSpeechInput('');
@@ -405,64 +538,93 @@ export const AICallModal: React.FC<AICallModalProps> = ({
 
     try {
       turnController.current = new AbortController();
-      const data = await askAssistant(newHistory, tasksRef.current, hybridMode, {
-        userName, voice: voiceName, language: callLanguage === 'bn-BD' ? 'bn' : 'en',
-      }, turnController.current.signal);
+      const data = await askAssistant(
+        newHistory,
+        tasksRef.current,
+        hybridMode,
+        {
+          userName,
+          voice: voiceName,
+          language: callLanguage === 'bn-BD' ? 'bn' : 'en',
+        },
+        turnController.current.signal
+      );
       if (turnController.current.signal.aborted) return;
-      {
-        const outcome = data.action ? onAction(data.action) : null;
-        if (outcome && !outcome.ok) { data.reply = outcome.message; data.audioBase64 = null; }
-        if (outcome?.ok) setActionNotice({ type: data.action.action === 'CREATE_TASK' ? 'create' : data.action.action === 'COMPLETE_TASK' ? 'complete' : data.action.action === 'DELETE_TASK' ? 'delete' : 'update', text: outcome.message });
-        const reply = data.reply || (callLanguage === 'bn-BD' ? 'ঠিক আছে, আমি খেয়াল রাখছি।' : "Got it, I've got you covered!");
-        setBriefingText(reply);
-        setConversationHistory((prev) => [...prev, { role: 'assistant', content: reply }]);
 
-        // Speak response out loud in the call & automatically resume listening when done
-        if (data.audioBase64) {
-          audioService.preloadAudioFromBase64(data.audioBase64, data.mimeType || 'audio/mp3', reply);
-          await audioService.playPreloadedOrSpeak(
-            reply,
-            voiceName,
-            () => {
-              setIsAiSpeaking(true);
-              stopListening();
-            },
-            () => {
-              setIsAiSpeaking(false);
-              setCallStatusMessage(
-                callLanguage === 'bn-BD'
-                  ? 'শুনছি... কথা বলুন'
-                  : 'Listening... speak freely'
-              );
-              startAutoListening();
-            }
-          );
-        } else {
-          await audioService.speakBriefing(
-            reply,
-            voiceName,
-            () => {
-              setIsAiSpeaking(true);
-              stopListening();
-            },
-            () => {
-              setIsAiSpeaking(false);
-              setCallStatusMessage(
-                callLanguage === 'bn-BD'
-                  ? 'শুনছি... কথা বলুন'
-                  : 'Listening... speak freely'
-              );
-              startAutoListening();
-            }
-          );
-        }
+      const outcome = data.action ? onAction(data.action) : null;
+      if (outcome && !outcome.ok) {
+        data.reply = outcome.message;
+        data.audioBase64 = null;
+      }
+      if (outcome?.ok) {
+        setActionNotice({
+          type:
+            data.action.action === 'CREATE_TASK'
+              ? 'create'
+              : data.action.action === 'COMPLETE_TASK'
+              ? 'complete'
+              : data.action.action === 'DELETE_TASK'
+              ? 'delete'
+              : 'update',
+          text: outcome.message,
+        });
+        hapticService.taskCreate();
+      }
+
+      const reply = data.reply || (callLanguage === 'bn-BD' ? 'ঠিক আছে, আমি খেয়াল রাখছি।' : "Got it, I've got you covered!");
+      setBriefingText(reply);
+      setConversationHistory((prev) => [...prev, { role: 'assistant', content: reply }]);
+
+      // Speak response out loud in the call & automatically resume listening when done
+      const onSpeechStart = () => {
+        isAiSpeakingRef.current = true;
+        setIsAiSpeaking(true);
+        stopListening();
+        setCallStatusMessage(callLanguage === 'bn-BD' ? 'কথা বলছি...' : 'Aria is speaking...');
+      };
+
+      const onSpeechEnd = () => {
+        isAiSpeakingRef.current = false;
+        setIsAiSpeaking(false);
+        isProcessingTurnRef.current = false;
+        setIsProcessingTurn(false);
+        lastAiSpeechEndTimeRef.current = Date.now();
+        setCallStatusMessage(
+          callLanguage === 'bn-BD'
+            ? 'শুনছি... কথা বলুন'
+            : 'Listening... speak freely'
+        );
+        setTimeout(() => {
+          startAutoListening();
+        }, 180);
+      };
+
+      if (data.audioBase64) {
+        audioService.preloadAudioFromBase64(data.audioBase64, data.mimeType || 'audio/mp3', reply);
+        await audioService.playPreloadedOrSpeak(reply, voiceName, onSpeechStart, onSpeechEnd);
+      } else {
+        await audioService.speakBriefing(reply, voiceName, onSpeechStart, onSpeechEnd);
       }
     } catch (err) {
-      console.warn('Fallback to local assistant turn:', err);
+      console.warn('Voice turn error:', err);
       setCallStatusMessage("I'm right here. Could you say that again?");
-      startAutoListening();
-    } finally {
+      isProcessingTurnRef.current = false;
       setIsProcessingTurn(false);
+      startAutoListening();
+    }
+  };
+
+  // Instant Tap-To-Send / Done Speaking
+  const handleInstantSend = () => {
+    const textToSend = speechTranscriptRef.current.trim() || userSpeechInput.trim();
+    if (textToSend) {
+      hapticService.lightTap();
+      stopListening();
+      speechTranscriptRef.current = '';
+      setCallStatusMessage(callLanguage === 'bn-BD' ? 'ভাবছি...' : 'Aria is thinking...');
+      handleConversationalVoiceTurn(textToSend);
+    } else if (isAiSpeaking) {
+      handleVoiceBargeIn();
     }
   };
 
@@ -483,7 +645,7 @@ export const AICallModal: React.FC<AICallModalProps> = ({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-2xl animate-fade-in p-4 select-none">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-3xl animate-fade-in p-4 select-none">
       {/* INCOMING RINGING SCREEN */}
       {callState === 'ringing' && (
         <div className="w-full max-w-sm flex flex-col items-center justify-between min-h-[540px] py-10 px-6 text-white text-center">
@@ -564,37 +726,45 @@ export const AICallModal: React.FC<AICallModalProps> = ({
         </div>
       )}
 
-      {/* CONNECTED CALL SCREEN (Natural Conversational Assistant) */}
+      {/* CONNECTED CALL SCREEN (Gemini Live Experience) */}
       {callState === 'connected' && (
-        <div className="w-full max-w-md bg-slate-900/90 border border-slate-800 rounded-3xl p-6 shadow-2xl flex flex-col items-center justify-between min-h-[620px] text-white backdrop-blur-xl">
-          {/* Header, Duration & Language Switcher */}
-          <div className="w-full flex items-center justify-between border-b border-slate-800 pb-3">
+        <div className="w-full max-w-md bg-gradient-to-b from-slate-900/95 via-slate-950/95 to-slate-900/95 border border-slate-800/80 rounded-3xl p-6 shadow-2xl flex flex-col items-center justify-between min-h-[640px] text-white backdrop-blur-2xl relative overflow-hidden">
+          
+          {/* Ambient Lighting Orbs */}
+          <div className="absolute -top-24 -left-24 w-56 h-56 rounded-full bg-indigo-600/15 blur-3xl pointer-events-none" />
+          <div className="absolute -bottom-24 -right-24 w-56 h-56 rounded-full bg-cyan-600/15 blur-3xl pointer-events-none" />
+
+          {/* Top Bar: Aria Identity, Live Badge & Language Switcher */}
+          <div className="w-full flex items-center justify-between border-b border-slate-800/80 pb-3 relative z-10">
             <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-indigo-500 to-violet-600 flex items-center justify-center shadow-md shadow-indigo-500/30">
+              <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-cyan-500 via-indigo-500 to-violet-600 flex items-center justify-center shadow-md shadow-indigo-500/25">
                 <Bot className="w-5 h-5 text-white" />
               </div>
               <div className="text-left">
-                <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
+                <h3 className="text-sm font-extrabold text-white flex items-center gap-1.5">
                   Aria
-                  <span className="text-[10px] font-normal px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                    Chief of Staff
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                    Gemini Live
                   </span>
                 </h3>
-                <span className="text-[11px] text-emerald-400 font-mono flex items-center gap-1 mt-0.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  Live Call · {formatTimer(callDuration)}
+                <span className="text-[11px] text-emerald-400 font-mono flex items-center gap-1.5 mt-0.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  Live Voice · {formatTimer(callDuration)}
                 </span>
               </div>
             </div>
 
             {/* Language Switcher */}
-            <div className="flex items-center gap-1 bg-slate-800/80 p-1 rounded-xl border border-slate-700/60">
+            <div className="flex items-center gap-1 bg-slate-800/80 p-1 rounded-xl border border-slate-700/60 shadow-inner">
               <button
                 type="button"
-                onClick={() => setCallLanguage('en-US')}
-                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition ${
+                onClick={() => {
+                  setCallLanguage('en-US');
+                  hapticService.lightTap();
+                }}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
                   callLanguage === 'en-US'
-                    ? 'bg-indigo-600 text-white shadow-sm'
+                    ? 'bg-gradient-to-r from-indigo-600 to-violet-600 text-white shadow-sm'
                     : 'text-slate-400 hover:text-white'
                 }`}
                 title="English"
@@ -603,10 +773,13 @@ export const AICallModal: React.FC<AICallModalProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => setCallLanguage('bn-BD')}
-                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition ${
+                onClick={() => {
+                  setCallLanguage('bn-BD');
+                  hapticService.lightTap();
+                }}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
                   callLanguage === 'bn-BD'
-                    ? 'bg-indigo-600 text-white shadow-sm'
+                    ? 'bg-gradient-to-r from-indigo-600 to-violet-600 text-white shadow-sm'
                     : 'text-slate-400 hover:text-white'
                 }`}
                 title="বাংলা"
@@ -616,71 +789,106 @@ export const AICallModal: React.FC<AICallModalProps> = ({
             </div>
           </div>
 
-          {/* Action Notification Toast */}
+          {/* Action Notification Card (Floating Real-time Update) */}
           {actionNotice && (
-            <div className="w-full mt-2 p-2.5 rounded-xl bg-indigo-950/80 border border-indigo-500/40 flex items-center gap-2 text-xs text-indigo-200 animate-in fade-in slide-in-from-top-2">
+            <div className="w-full mt-2 p-3 rounded-2xl bg-gradient-to-r from-indigo-950/90 to-slate-900/90 border border-indigo-500/40 flex items-center gap-2.5 text-xs text-indigo-200 shadow-lg shadow-indigo-950/50 animate-in fade-in slide-in-from-top-2 relative z-10">
               {actionNotice.type === 'create' && <Plus className="w-4 h-4 text-emerald-400 shrink-0" />}
               {actionNotice.type === 'update' && <Edit3 className="w-4 h-4 text-amber-400 shrink-0" />}
               {actionNotice.type === 'complete' && <Check className="w-4 h-4 text-emerald-400 shrink-0" />}
               {actionNotice.type === 'delete' && <Trash2 className="w-4 h-4 text-rose-400 shrink-0" />}
-              <span className="truncate font-medium">{actionNotice.text}</span>
+              <span className="truncate font-semibold tracking-wide">{actionNotice.text}</span>
             </div>
           )}
 
-          {/* Central Living Orb Visualizer */}
-          <div className="flex flex-col items-center my-4 space-y-3">
-            <div className={`relative w-28 h-28 rounded-full flex items-center justify-center transition-all duration-500 ${
-              isAiSpeaking
-                ? 'bg-gradient-to-tr from-indigo-500 via-violet-500 to-indigo-600 shadow-2xl shadow-indigo-500/60 scale-105 ring-8 ring-indigo-500/20'
-                : isMuted
-                ? 'bg-slate-800 border-2 border-rose-500/40 text-rose-300'
-                : isUserListening
-                ? 'bg-gradient-to-tr from-emerald-500 to-teal-500 shadow-2xl shadow-emerald-500/50 scale-105 ring-8 ring-emerald-500/20'
-                : 'bg-slate-800 border border-slate-700'
-            }`}>
-              {isAiSpeaking ? (
-                <Volume2 className="w-12 h-12 text-white animate-pulse" />
-              ) : isMuted ? (
-                <MicOff className="w-11 h-11 text-rose-400" />
-              ) : isUserListening ? (
-                <Mic className="w-12 h-12 text-white animate-pulse" />
-              ) : (
-                <Sparkles className="w-10 h-10 text-indigo-300 animate-spin" />
-              )}
-            </div>
+          {/* Central Gemini Live Dynamic Aura Orb */}
+          <div className="flex flex-col items-center my-4 space-y-4 relative z-10 w-full">
+            <button
+              onClick={handleInstantSend}
+              className="relative group focus:outline-none"
+              title={isAiSpeaking ? 'Tap to interrupt Aria' : userSpeechInput ? 'Tap to send immediately' : 'Tap to talk'}
+            >
+              {/* Outer Energy Halo (Scales dynamically with real microphone RMS volume!) */}
+              <div 
+                style={{
+                  transform: `scale(${1 + (audioVolume / 100) * 0.45})`,
+                  opacity: isMuted ? 0.1 : isAiSpeaking ? 0.7 : 0.4 + (audioVolume / 100) * 0.5,
+                  transition: 'transform 0.08s ease-out, opacity 0.15s ease-out',
+                }}
+                className={`absolute -inset-4 rounded-full blur-xl ${
+                  isMuted
+                    ? 'bg-rose-500'
+                    : isAiSpeaking
+                    ? 'bg-gradient-to-tr from-indigo-500 via-violet-500 to-cyan-400'
+                    : isProcessingTurn
+                    ? 'bg-cyan-500'
+                    : 'bg-gradient-to-tr from-emerald-500 via-teal-400 to-cyan-500'
+                }`}
+              />
 
-            {/* Reactive Sound Bars */}
-            <div className="flex items-center justify-center gap-1.5 h-6">
-              {[35, 75, 95, 60, 100, 80, 50, 85, 45].map((height, i) => (
+              {/* Pulsing Core Sphere */}
+              <div
+                style={{
+                  transform: `scale(${1 + (audioVolume / 100) * 0.15})`,
+                  transition: 'transform 0.08s ease-out',
+                }}
+                className={`relative w-32 h-32 rounded-full flex flex-col items-center justify-center transition-all duration-300 shadow-2xl border-2 ${
+                  isAiSpeaking
+                    ? 'bg-gradient-to-tr from-indigo-600 via-violet-600 to-cyan-500 border-indigo-300/40 shadow-indigo-500/50'
+                    : isMuted
+                    ? 'bg-slate-900 border-rose-500/50 shadow-rose-950/50 text-rose-400'
+                    : isProcessingTurn
+                    ? 'bg-gradient-to-tr from-slate-900 via-cyan-900 to-slate-900 border-cyan-400/50 shadow-cyan-500/30'
+                    : 'bg-gradient-to-tr from-emerald-600 via-teal-600 to-cyan-600 border-emerald-300/40 shadow-emerald-500/50'
+                }`}
+              >
+                {isAiSpeaking ? (
+                  <Radio className="w-12 h-12 text-white animate-pulse" />
+                ) : isMuted ? (
+                  <MicOff className="w-12 h-12 text-rose-400" />
+                ) : isProcessingTurn ? (
+                  <Sparkles className="w-12 h-12 text-cyan-300 animate-spin" />
+                ) : (
+                  <Mic className="w-12 h-12 text-white animate-pulse" />
+                )}
+
+                <span className="text-[10px] font-bold tracking-wider uppercase mt-1 text-white/90">
+                  {isAiSpeaking ? 'Aria' : isProcessingTurn ? 'Thinking' : isMuted ? 'Muted' : 'Live'}
+                </span>
+              </div>
+            </button>
+
+            {/* Real-time Frequency Spectrum Bars (Web Audio API Analyser) */}
+            <div className="flex items-center justify-center gap-1.5 h-8 w-48 px-2">
+              {frequencyData.map((height, i) => (
                 <span
                   key={i}
                   style={{
-                    height: isAiSpeaking || isUserListening ? `${height}%` : '20%',
-                    transition: 'height 0.15s ease-in-out',
+                    height: isMuted ? '12%' : `${Math.max(15, height)}%`,
+                    transition: 'height 0.08s ease-out',
                   }}
-                  className={`w-1 rounded-full ${
-                    isAiSpeaking
-                      ? 'bg-indigo-400 shadow-sm shadow-indigo-400'
-                      : isMuted
+                  className={`w-1.5 rounded-full ${
+                    isMuted
                       ? 'bg-slate-700'
-                      : isUserListening
-                      ? 'bg-emerald-400 shadow-sm shadow-emerald-400'
-                      : 'bg-slate-700'
+                      : isAiSpeaking
+                      ? 'bg-gradient-to-t from-indigo-500 to-cyan-400 shadow-sm shadow-indigo-400'
+                      : isProcessingTurn
+                      ? 'bg-cyan-400/60'
+                      : 'bg-gradient-to-t from-emerald-500 to-teal-300 shadow-sm shadow-emerald-400'
                   }`}
                 />
               ))}
             </div>
 
-            {/* Hands-Free State Badge */}
+            {/* Status Pill Badge */}
             <div className="flex flex-col items-center gap-1">
-              <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition-all border ${
+              <span className={`inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full text-xs font-bold transition-all border shadow-sm ${
                 isMuted
                   ? 'bg-rose-500/10 text-rose-300 border-rose-500/30'
                   : isAiSpeaking
-                  ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40 shadow-sm shadow-indigo-500/10'
+                  ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40 shadow-indigo-500/20'
                   : isProcessingTurn
-                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 animate-pulse'
-                  : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-sm shadow-emerald-500/20'
+                  ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40 animate-pulse'
+                  : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-emerald-500/20'
               }`}>
                 {!isMuted && !isAiSpeaking && !isProcessingTurn && (
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
@@ -688,31 +896,46 @@ export const AICallModal: React.FC<AICallModalProps> = ({
                 {isMuted
                   ? 'Muted · Tap mic to speak'
                   : isAiSpeaking
-                  ? 'Aria Speaking · Tap mic to interrupt'
+                  ? '✨ Aria Speaking · Speak to interrupt'
                   : isProcessingTurn
-                  ? 'Thinking...'
-                  : '🎙️ Hands-Free Live · Speak naturally'}
+                  ? '🌀 Aria is thinking...'
+                  : '🎙️ Gemini Live · Listening...'}
               </span>
-              <p className="text-[11px] font-mono text-slate-400 text-center px-4">
+              <p className="text-[11px] font-medium text-slate-400 text-center px-4">
                 {callStatusMessage}
               </p>
             </div>
           </div>
 
-          {/* Natural Dialogue Stream Box */}
-          <div className="w-full bg-slate-950/70 border border-slate-800/80 rounded-2xl p-4 text-left my-2 max-h-36 overflow-y-auto space-y-2">
-            {userSpeechInput && (
-              <div className="p-2 rounded-xl bg-slate-800/80 border border-emerald-500/30 text-xs text-emerald-300 font-mono animate-in fade-in">
-                🗣️ You: "{userSpeechInput}"
+          {/* Gemini Live HUD: Real-Time Subtitles & Transcript Stream */}
+          <div className="w-full bg-slate-950/80 border border-slate-800/80 rounded-2xl p-4 text-left my-2 max-h-36 overflow-y-auto space-y-2 relative z-10 backdrop-blur-md">
+            {/* Live Streaming User Speech */}
+            {userSpeechInput ? (
+              <div className="p-2.5 rounded-xl bg-slate-900/90 border border-emerald-500/40 text-xs text-emerald-300 font-sans flex items-center justify-between gap-2 animate-in fade-in">
+                <span className="truncate">🗣️ <strong className="text-white">You:</strong> "{userSpeechInput}"</span>
+                <button
+                  onClick={handleInstantSend}
+                  className="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10px] flex items-center gap-1 shrink-0 shadow-sm"
+                  title="Send now"
+                >
+                  <Send className="w-3 h-3" />
+                  <span>Send</span>
+                </button>
               </div>
+            ) : (
+              <p className="text-xs text-slate-400 italic">
+                {isAiSpeaking ? 'Aria is speaking...' : 'Listening in real-time... speak naturally'}
+              </p>
             )}
-            <p className="text-sm text-slate-200 leading-relaxed font-sans font-medium">
+
+            {/* Aria's Current Spoken Response */}
+            <p className="text-sm text-slate-100 leading-relaxed font-sans font-medium pt-1">
               "{briefingText || (callLanguage === 'bn-BD' ? 'কীভাবে সাহায্য করতে পারি বলুন...' : "How's your day going? How can I help?")}"
             </p>
           </div>
 
-          {/* Thought Suggestions */}
-          <div className="w-full py-1">
+          {/* Quick Natural Conversational Chips */}
+          <div className="w-full py-1 relative z-10">
             <div className="flex flex-wrap gap-1.5 justify-center">
               {callLanguage === 'bn-BD' ? (
                 <>
@@ -766,8 +989,8 @@ export const AICallModal: React.FC<AICallModalProps> = ({
             </div>
           </div>
 
-          {/* Controls: Replay / Repeat + Hands-Free Mic / Barge-In + Hang Up */}
-          <div className="w-full pt-3 flex items-center justify-around border-t border-slate-800">
+          {/* Bottom Dock: Repeat + Hands-Free Mic / Barge-In + Hang Up */}
+          <div className="w-full pt-3 flex items-center justify-around border-t border-slate-800/80 relative z-10">
             {/* Repeat Briefing / Reply Button */}
             <div className="flex flex-col items-center gap-1">
               <button
@@ -820,6 +1043,7 @@ export const AICallModal: React.FC<AICallModalProps> = ({
               <span className="text-[10px] text-slate-400 font-medium">End Call</span>
             </div>
           </div>
+
         </div>
       )}
     </div>

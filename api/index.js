@@ -141,7 +141,7 @@ function createAiRouter() {
   const router = express.Router();
   const key = process.env.GEMINI_API_KEY;
   const ai = key ? new GoogleGenAI({ apiKey: key, httpOptions: { timeout: 18e3 } }) : null;
-  const textModel = process.env.GEMINI_TEXT_MODEL || "gemini-3.1-flash-lite";
+  const textModel = process.env.GEMINI_TEXT_MODEL || "gemini-2.0-flash";
   const speechModel = process.env.GEMINI_TTS_MODEL || "gemini-2.5-flash-preview-tts";
   async function text(contents, systemInstruction, json = false) {
     const response = await ai.models.generateContent({ model: textModel, contents, config: { systemInstruction, temperature: 0.2, ...json ? { responseMimeType: "application/json" } : {} } });
