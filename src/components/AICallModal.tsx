@@ -68,6 +68,7 @@ export const AICallModal: React.FC<AICallModalProps> = ({
   const [callDuration, setCallDuration] = useState(0);
   const [isAiSpeaking, setIsAiSpeaking] = useState(false);
   const [isUserListening, setIsUserListening] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
   const [briefingText, setBriefingText] = useState('');
   const [userSpeechInput, setUserSpeechInput] = useState('');
   const [callStatusMessage, setCallStatusMessage] = useState('Connecting voice assistant...');
@@ -86,31 +87,82 @@ export const AICallModal: React.FC<AICallModalProps> = ({
   const speechTranscriptRef = useRef<string>('');
   const tasksRef = useRef<Task[]>(tasks);
   const turnController = useRef<AbortController | null>(null);
-  useEffect(() => {
-    return () => { turnController.current?.abort(); recognitionRef.current?.abort(); audioService.stopSpeaking(); };
-  }, []);
+  const isMutedRef = useRef(false);
+  const isAiSpeakingRef = useRef(false);
+  const isProcessingTurnRef = useRef(false);
+  const callStateRef = useRef(callState);
+  const silenceTimerRef = useRef<any>(null);
+  const autoRestartTimerRef = useRef<any>(null);
 
   useEffect(() => {
     tasksRef.current = tasks;
   }, [tasks]);
 
-  // Manage Call Timer
   useEffect(() => {
+    isMutedRef.current = isMuted;
+  }, [isMuted]);
+
+  useEffect(() => {
+    isAiSpeakingRef.current = isAiSpeaking;
+  }, [isAiSpeaking]);
+
+  useEffect(() => {
+    isProcessingTurnRef.current = isProcessingTurn;
+  }, [isProcessingTurn]);
+
+  // Clean stop for speech recognition
+  const stopListening = () => {
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+    if (autoRestartTimerRef.current) {
+      clearTimeout(autoRestartTimerRef.current);
+      autoRestartTimerRef.current = null;
+    }
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.abort();
+      } catch {
+        // ignore
+      }
+      recognitionRef.current = null;
+    }
+    setIsUserListening(false);
+  };
+
+  useEffect(() => {
+    return () => {
+      turnController.current?.abort();
+      stopListening();
+      audioService.stopSpeaking();
+    };
+  }, []);
+
+  // Manage Call Timer & Lifecycle
+  useEffect(() => {
+    callStateRef.current = callState;
     if (callState === 'connected') {
       setCallDuration(0);
+      setIsMuted(false);
+      isMutedRef.current = false;
       timerRef.current = window.setInterval(() => {
         setCallDuration((prev) => prev + 1);
       }, 1000);
     } else {
+      stopListening();
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
       }
       setConversationHistory([]);
       setActionNotice(null);
+      setIsMuted(false);
+      isMutedRef.current = false;
     }
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
+      stopListening();
     };
   }, [callState]);
 
@@ -134,6 +186,134 @@ export const AICallModal: React.FC<AICallModalProps> = ({
     }
   }, [callState, tasks, userName, voiceName, callType]);
 
+  // Hands-Free Direct Speech Auto-Listening
+  const startAutoListening = () => {
+    if (
+      callStateRef.current !== 'connected' ||
+      isMutedRef.current ||
+      isAiSpeakingRef.current ||
+      isProcessingTurnRef.current
+    ) {
+      return;
+    }
+
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      setCallStatusMessage('Voice recognition is not supported in this browser. Use the quick buttons below.');
+      return;
+    }
+
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.abort();
+      } catch {}
+      recognitionRef.current = null;
+    }
+
+    try {
+      speechTranscriptRef.current = '';
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = callLanguage;
+
+      recognition.onstart = () => {
+        setIsUserListening(true);
+        setCallStatusMessage(
+          callLanguage === 'bn-BD'
+            ? 'শুনছি... সরাসরি কথা বলুন'
+            : 'Listening... speak directly'
+        );
+      };
+
+      recognition.onresult = (event: any) => {
+        let interim = '';
+        let final = '';
+        for (let i = 0; i < event.results.length; i++) {
+          const transcriptChunk = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            final += transcriptChunk + ' ';
+          } else {
+            interim += transcriptChunk;
+          }
+        }
+        const combined = (final + interim).trim();
+        speechTranscriptRef.current = combined;
+        setUserSpeechInput(combined);
+
+        // Auto-detect Bengali script in speech and adapt language indicator
+        if (/[\u0980-\u09FF]/.test(combined) && callLanguage !== 'bn-BD') {
+          setCallLanguage('bn-BD');
+        }
+
+        // Reset silence timer on every spoken word
+        if (silenceTimerRef.current) {
+          clearTimeout(silenceTimerRef.current);
+        }
+
+        // When user pauses speaking for 1.2s, auto-send turn to Gemini!
+        if (combined.length > 0) {
+          silenceTimerRef.current = setTimeout(() => {
+            const textToSend = speechTranscriptRef.current.trim();
+            if (textToSend && !isProcessingTurnRef.current) {
+              stopListening();
+              speechTranscriptRef.current = '';
+              setCallStatusMessage(
+                callLanguage === 'bn-BD'
+                  ? 'প্রসেস হচ্ছে...'
+                  : 'Processing your instruction...'
+              );
+              handleConversationalVoiceTurn(textToSend);
+            }
+          }, 1200);
+        }
+      };
+
+      recognition.onerror = (event: any) => {
+        if (event.error !== 'no-speech') {
+          console.warn('Speech recognition notice:', event.error);
+        }
+      };
+
+      recognition.onend = () => {
+        setIsUserListening(false);
+        recognitionRef.current = null;
+
+        // If there is an unsent transcript, send it
+        const pendingText = speechTranscriptRef.current.trim();
+        if (pendingText && !isProcessingTurnRef.current && !isAiSpeakingRef.current) {
+          speechTranscriptRef.current = '';
+          setCallStatusMessage(
+            callLanguage === 'bn-BD'
+              ? 'প্রসেস হচ্ছে...'
+              : 'Processing your instruction...'
+          );
+          handleConversationalVoiceTurn(pendingText);
+          return;
+        }
+
+        // Otherwise keep listening loop alive while call is connected and unmuted
+        if (
+          callStateRef.current === 'connected' &&
+          !isMutedRef.current &&
+          !isAiSpeakingRef.current &&
+          !isProcessingTurnRef.current
+        ) {
+          autoRestartTimerRef.current = setTimeout(() => {
+            startAutoListening();
+          }, 250);
+        }
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+    } catch (e) {
+      console.warn('Failed to start speech recognition loop:', e);
+      setIsUserListening(false);
+    }
+  };
+
   // When user answers (connects): GID speaks immediately without delay!
   useEffect(() => {
     if (callState === 'connected') {
@@ -142,6 +322,7 @@ export const AICallModal: React.FC<AICallModalProps> = ({
   }, [callState]);
 
   const playInstantBriefing = async () => {
+    stopListening();
     setCallStatusMessage(callLanguage === 'bn-BD' ? 'কথা বলছি...' : 'Speaking...');
 
     let scriptToSpeak = briefingText;
@@ -169,84 +350,52 @@ export const AICallModal: React.FC<AICallModalProps> = ({
     await audioService.playPreloadedOrSpeak(
       scriptToSpeak,
       voiceName,
-      () => setIsAiSpeaking(true),
+      () => {
+        setIsAiSpeaking(true);
+        stopListening();
+      },
       () => {
         setIsAiSpeaking(false);
         setCallStatusMessage(
           callLanguage === 'bn-BD'
-            ? 'শুনছি... (কথা বলুন বা মাইক চাপুন)'
-            : 'Listening... (speak instruction or tap mic)'
+            ? 'শুনছি... সরাসরি কথা বলুন'
+            : 'Listening... speak directly'
         );
+        startAutoListening();
       }
     );
   };
 
-  // Toggle user voice recognition (supports Bangla 'bn-BD' and English 'en-US')
-  const toggleSpeechRecognition = () => {
+  // Toggle Mute / Interrupt AI Speech
+  const toggleMuteOrInterrupt = () => {
     hapticService.lightTap();
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      setCallStatusMessage('Voice recognition is not supported in this browser. Use the quick buttons below.');
+
+    // If AI is currently speaking, user tapping mic interrupts the AI (barge-in) and opens mic!
+    if (isAiSpeaking) {
+      audioService.stopSpeaking();
+      setIsAiSpeaking(false);
+      setIsMuted(false);
+      isMutedRef.current = false;
+      setUserSpeechInput('');
+      setCallStatusMessage(callLanguage === 'bn-BD' ? 'বলুন, শুনছি...' : 'Go ahead, listening...');
+      startAutoListening();
       return;
     }
 
-    if (isUserListening) {
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
-      }
-      setIsUserListening(false);
-      return;
-    }
-
-    try {
-      speechTranscriptRef.current = '';
-      const recognition = new SpeechRecognition();
-      recognition.continuous = false;
-      recognition.interimResults = true;
-      recognition.lang = callLanguage; // Dynamic language switch (English / বাংলা)
-
-      recognition.onstart = () => {
-        setIsUserListening(true);
-        setCallStatusMessage(callLanguage === 'bn-BD' ? 'বাংলায় শুনছি...' : 'Listening to you...');
-      };
-
-      recognition.onresult = (event: any) => {
-        const transcript = Array.from(event.results)
-          .map((res: any) => res[0].transcript)
-          .join('');
-        speechTranscriptRef.current = transcript;
-        setUserSpeechInput(transcript);
-
-        // Auto-detect Bengali script in speech and adapt language indicator
-        if (/[\u0980-\u09FF]/.test(transcript) && callLanguage !== 'bn-BD') {
-          setCallLanguage('bn-BD');
-        }
-      };
-
-      recognition.onerror = (event: any) => {
-        console.warn('Speech error:', event.error);
-        setIsUserListening(false);
-        setCallStatusMessage(callLanguage === 'bn-BD' ? 'প্রস্তুত (মাইক চাপুন)' : 'Ready (tap mic to speak)');
-      };
-
-      recognition.onend = () => {
-        setIsUserListening(false);
-        const finalTranscript = speechTranscriptRef.current.trim();
-        if (finalTranscript) {
-          setCallStatusMessage(callLanguage === 'bn-BD' ? 'প্রসেস হচ্ছে...' : 'Processing instruction with Gemini...');
-          handleConversationalVoiceTurn(finalTranscript);
-          speechTranscriptRef.current = '';
-        } else {
-          setCallStatusMessage(callLanguage === 'bn-BD' ? 'প্রস্তুত (মাইক চাপুন)' : 'Ready (tap mic to speak)');
-        }
-      };
-
-      recognitionRef.current = recognition;
-      recognition.start();
-    } catch (e) {
-      console.error('Failed to start speech recognition:', e);
-      setIsUserListening(false);
-      setCallStatusMessage('Microphone access unavailable');
+    // Otherwise toggle Mute / Unmute
+    if (!isMuted) {
+      setIsMuted(true);
+      isMutedRef.current = true;
+      stopListening();
+      setCallStatusMessage(
+        callLanguage === 'bn-BD'
+          ? 'মাইক্রোফোন মিউট করা হয়েছে (আনমিউট করতে ট্যাপ করুন)'
+          : 'Microphone muted (tap to unmute)'
+      );
+    } else {
+      setIsMuted(false);
+      isMutedRef.current = false;
+      startAutoListening();
     }
   };
 
@@ -254,6 +403,7 @@ export const AICallModal: React.FC<AICallModalProps> = ({
   const handleConversationalVoiceTurn = async (spokenText: string) => {
     if (!spokenText.trim() || isProcessingTurn) return;
     setIsProcessingTurn(true);
+    stopListening();
     setUserSpeechInput('');
 
     const newHistory = [...conversationHistory, { role: 'user' as const, content: spokenText }];
@@ -273,26 +423,42 @@ export const AICallModal: React.FC<AICallModalProps> = ({
         setBriefingText(reply);
         setConversationHistory((prev) => [...prev, { role: 'assistant', content: reply }]);
 
-        // Speak response out loud in the call
+        // Speak response out loud in the call & automatically resume listening when done
         if (data.audioBase64) {
           audioService.preloadAudioFromBase64(data.audioBase64, data.mimeType || 'audio/mp3', reply);
           await audioService.playPreloadedOrSpeak(
             reply,
             voiceName,
-            () => setIsAiSpeaking(true),
+            () => {
+              setIsAiSpeaking(true);
+              stopListening();
+            },
             () => {
               setIsAiSpeaking(false);
-              setCallStatusMessage(callLanguage === 'bn-BD' ? 'শুনছি...' : 'Listening... (tap mic)');
+              setCallStatusMessage(
+                callLanguage === 'bn-BD'
+                  ? 'শুনছি... সরাসরি কথা বলুন'
+                  : 'Listening... speak directly'
+              );
+              startAutoListening();
             }
           );
         } else {
           await audioService.speakBriefing(
             reply,
             voiceName,
-            () => setIsAiSpeaking(true),
+            () => {
+              setIsAiSpeaking(true);
+              stopListening();
+            },
             () => {
               setIsAiSpeaking(false);
-              setCallStatusMessage(callLanguage === 'bn-BD' ? 'শুনছি...' : 'Listening... (tap mic)');
+              setCallStatusMessage(
+                callLanguage === 'bn-BD'
+                  ? 'শুনছি... সরাসরি কথা বলুন'
+                  : 'Listening... speak directly'
+              );
+              startAutoListening();
             }
           );
         }
@@ -300,6 +466,7 @@ export const AICallModal: React.FC<AICallModalProps> = ({
     } catch (err) {
       console.warn('Fallback to local call command parser:', err);
       setCallStatusMessage('Please try that instruction again.');
+      startAutoListening();
     } finally {
       setIsProcessingTurn(false);
     }
@@ -459,16 +626,20 @@ export const AICallModal: React.FC<AICallModalProps> = ({
           )}
 
           {/* Central Voice Visualizer & Animated Waveform */}
-          <div className="flex flex-col items-center my-4 space-y-3">
+          <div className="flex flex-col items-center my-3 space-y-2.5">
             <div className={`relative w-24 h-24 rounded-full flex items-center justify-center transition-all duration-300 ${
               isAiSpeaking
                 ? 'bg-gradient-to-tr from-indigo-500 to-violet-500 shadow-xl shadow-indigo-500/50 scale-105 ring-4 ring-indigo-500/20'
+                : isMuted
+                ? 'bg-rose-950/60 border border-rose-500/40 text-rose-300'
                 : isUserListening
-                ? 'bg-amber-500 shadow-xl shadow-amber-500/40 scale-105 ring-4 ring-amber-500/20'
+                ? 'bg-emerald-500 shadow-xl shadow-emerald-500/40 scale-105 ring-4 ring-emerald-500/20'
                 : 'bg-slate-800 border border-slate-700'
             }`}>
               {isAiSpeaking ? (
                 <Volume2 className="w-10 h-10 text-white animate-pulse" />
+              ) : isMuted ? (
+                <MicOff className="w-10 h-10 text-rose-400" />
               ) : isUserListening ? (
                 <Mic className="w-10 h-10 text-white animate-pulse" />
               ) : (
@@ -477,7 +648,7 @@ export const AICallModal: React.FC<AICallModalProps> = ({
             </div>
 
             {/* Audio Wave Bars */}
-            <div className="flex items-center justify-center gap-1.5 h-7">
+            <div className="flex items-center justify-center gap-1.5 h-6">
               {[40, 70, 90, 60, 100, 75, 45, 80, 50].map((height, i) => (
                 <span
                   key={i}
@@ -486,22 +657,51 @@ export const AICallModal: React.FC<AICallModalProps> = ({
                     transition: 'height 0.15s ease-in-out',
                   }}
                   className={`w-1 rounded-full ${
-                    isAiSpeaking ? 'bg-indigo-400' : isUserListening ? 'bg-amber-400' : 'bg-slate-700'
+                    isAiSpeaking
+                      ? 'bg-indigo-400'
+                      : isMuted
+                      ? 'bg-slate-700'
+                      : isUserListening
+                      ? 'bg-emerald-400'
+                      : 'bg-slate-700'
                   }`}
                 />
               ))}
             </div>
 
-            <p className="text-xs font-mono text-indigo-300/90 text-center px-4">
-              {callStatusMessage}
-            </p>
+            {/* Hands-Free Live Status Badge */}
+            <div className="flex flex-col items-center gap-1">
+              <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold transition-all border ${
+                isMuted
+                  ? 'bg-rose-500/10 text-rose-300 border-rose-500/30'
+                  : isAiSpeaking
+                  ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40'
+                  : isProcessingTurn
+                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 animate-pulse'
+                  : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-sm shadow-emerald-500/20'
+              }`}>
+                {!isMuted && !isAiSpeaking && !isProcessingTurn && (
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                )}
+                {isMuted
+                  ? 'Muted (Tap mic to talk)'
+                  : isAiSpeaking
+                  ? 'AI Speaking (Tap mic to interrupt)'
+                  : isProcessingTurn
+                  ? 'Thinking...'
+                  : '🎙️ Hands-Free Live • Speak directly'}
+              </span>
+              <p className="text-[11px] font-mono text-slate-400 text-center px-4">
+                {callStatusMessage}
+              </p>
+            </div>
           </div>
 
           {/* Live Spoken Dialogue Box */}
-          <div className="w-full bg-slate-950/70 border border-slate-800/80 rounded-2xl p-3.5 text-left my-2 max-h-36 overflow-y-auto space-y-2">
+          <div className="w-full bg-slate-950/70 border border-slate-800/80 rounded-2xl p-3.5 text-left my-1.5 max-h-36 overflow-y-auto space-y-2">
             {userSpeechInput && (
-              <div className="p-2 rounded-xl bg-slate-800/50 text-[11px] text-amber-300 font-mono">
-                🎤 You: "{userSpeechInput}"
+              <div className="p-2 rounded-xl bg-slate-800/60 border border-emerald-500/30 text-[11px] text-emerald-300 font-mono animate-in fade-in">
+                🗣️ You: "{userSpeechInput}"
               </div>
             )}
             <p className="text-xs text-slate-200 leading-relaxed font-sans">
@@ -510,7 +710,7 @@ export const AICallModal: React.FC<AICallModalProps> = ({
           </div>
 
           {/* Quick Spoken Instruction Chips (English & Bangla) */}
-          <div className="w-full py-1.5">
+          <div className="w-full py-1">
             <div className="flex flex-wrap gap-1.5 justify-center">
               {callLanguage === 'bn-BD' ? (
                 <>
@@ -578,8 +778,8 @@ export const AICallModal: React.FC<AICallModalProps> = ({
             </div>
           </div>
 
-          {/* Controls: Microphone + Replay + End Call */}
-          <div className="w-full pt-4 flex items-center justify-around border-t border-slate-800">
+          {/* Controls: Replay + Hands-Free Mic / Mute + End Call */}
+          <div className="w-full pt-3 flex items-center justify-around border-t border-slate-800">
             {/* Repeat Briefing / Reply Button */}
             <button
               onClick={playInstantBriefing}
@@ -589,18 +789,33 @@ export const AICallModal: React.FC<AICallModalProps> = ({
               <RefreshCw className="w-5 h-5" />
             </button>
 
-            {/* User Speech Mic Button (Push or toggle to speak) */}
-            <button
-              onClick={toggleSpeechRecognition}
-              className={`w-16 h-16 rounded-full flex items-center justify-center transition-all shadow-md touch-manipulation min-h-[64px] min-w-[64px] ${
-                isUserListening
-                  ? 'bg-amber-500 text-white animate-pulse shadow-amber-500/40 ring-4 ring-amber-500/20 scale-105'
-                  : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-600/30'
-              }`}
-              title={isUserListening ? 'Stop listening' : 'Tap to speak instruction'}
-            >
-              {isUserListening ? <MicOff className="w-7 h-7" /> : <Mic className="w-7 h-7" />}
-            </button>
+            {/* User Speech Mic Button (Direct Voice Active / Mute / Interrupt) */}
+            <div className="flex flex-col items-center gap-1">
+              <button
+                onClick={toggleMuteOrInterrupt}
+                className={`w-16 h-16 rounded-full flex items-center justify-center transition-all shadow-md touch-manipulation min-h-[64px] min-w-[64px] ${
+                  isMuted
+                    ? 'bg-slate-800 border-2 border-rose-500/60 text-rose-400 hover:bg-rose-500/20'
+                    : isAiSpeaking
+                    ? 'bg-indigo-600/70 border-2 border-indigo-400 text-white animate-pulse'
+                    : isUserListening
+                    ? 'bg-emerald-500 text-white animate-pulse shadow-emerald-500/40 ring-4 ring-emerald-500/25 scale-105'
+                    : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-600/30'
+                }`}
+                title={
+                  isMuted
+                    ? 'Unmute microphone'
+                    : isAiSpeaking
+                    ? 'Tap to interrupt AI'
+                    : 'Tap to mute microphone'
+                }
+              >
+                {isMuted ? <MicOff className="w-7 h-7" /> : <Mic className="w-7 h-7" />}
+              </button>
+              <span className="text-[10px] text-slate-400 font-medium">
+                {isMuted ? 'Muted' : isAiSpeaking ? 'Interrupt' : 'Direct Voice'}
+              </span>
+            </div>
 
             {/* End Call Hangup */}
             <button
