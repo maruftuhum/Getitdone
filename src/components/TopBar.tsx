@@ -40,7 +40,7 @@ export const TopBar: React.FC<TopBarProps> = ({
             <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 leading-tight">
               {activeTab === 'tasks' && 'Tasks & Schedule'}
               {activeTab === 'calendar' && 'Calendar View'}
-              {activeTab === 'call' && 'AI Voice Briefing'}
+              {activeTab === 'call' && 'Personal Assistant'}
               {activeTab === 'chat' && 'Assistant Chat'}
               {activeTab === 'settings' && 'App & Alarms'}
             </span>
@@ -96,7 +96,7 @@ export const TopBar: React.FC<TopBarProps> = ({
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 dark:text-indigo-300 font-medium text-xs transition-colors active:scale-95 touch-manipulation min-h-[44px]"
           >
             <Phone className="w-3.5 h-3.5 fill-current animate-bounce" />
-            <span className="hidden xs:inline">Call Me</span>
+            <span className="hidden xs:inline">Call Aria</span>
           </button>
 
           {/* User Auth Profile */}

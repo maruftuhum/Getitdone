@@ -309,35 +309,72 @@ class AudioService {
     this.fallbackSpeechSynthesis(text, onStart, onEnd);
   }
 
+  // Clean raw text so it sounds completely human when spoken aloud
+  public static cleanSpokenText(raw: string): string {
+    if (!raw) return '';
+    return raw
+      .replace(/\[(?:Local\s+)?Assistant\]/gi, '')
+      .replace(/```[\s\S]*?```/g, '') // strip fenced blocks
+      .replace(/\[.*?\]/g, '') // strip bracket tags
+      .replace(/[*_#`~]/g, '') // strip markdown
+      .replace(/^\s*[-•*]\s+/gm, '') // strip bullet markers
+      .replace(/^\s*\d+\.\s+/gm, '') // strip numbered list prefixes
+      .replace(/([\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD10-\uDDFF])/g, '') // strip emojis
+      .replace(/\b(\d{1,2}):(\d{2})\b/g, (_m, h, min) => {
+        const hour = parseInt(h, 10);
+        const period = hour >= 12 ? 'PM' : 'AM';
+        const h12 = hour % 12 || 12;
+        return min === '00' ? `${h12} ${period}` : `${h12}:${min} ${period}`;
+      })
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+  }
+
   private fallbackSpeechSynthesis(text: string, onStart?: () => void, onEnd?: () => void) {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
       if (onEnd) onEnd();
       return;
     }
 
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 1.0;
-    utterance.pitch = 1.0;
+    const cleanedText = AudioService.cleanSpokenText(text);
+    if (!cleanedText) {
+      if (onEnd) onEnd();
+      return;
+    }
 
-    const isBangla = /[\u0980-\u09FF]/.test(text);
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(cleanedText);
+    utterance.rate = 1.02; // lively conversational cadence
+    utterance.pitch = 1.02; // warm natural tone
+
+    const isBangla = /[\u0980-\u09FF]/.test(cleanedText);
     utterance.lang = isBangla ? 'bn-BD' : 'en-US';
 
-    // Pick pleasant natural voice or Bangla voice if available
+    // Intelligently score and select the most human, natural voice
     const voices = window.speechSynthesis.getVoices();
     if (isBangla) {
       const bnVoice = voices.find(
         (v) => v.lang.startsWith('bn') || v.name.toLowerCase().includes('bangla') || v.name.toLowerCase().includes('bengali')
       );
-      if (bnVoice) {
-        utterance.voice = bnVoice;
-      }
+      if (bnVoice) utterance.voice = bnVoice;
     } else {
-      const preferredVoice = voices.find(
-        (v) => v.name.includes('Natural') || v.name.includes('Google') || v.lang.startsWith('en')
-      );
-      if (preferredVoice) {
-        utterance.voice = preferredVoice;
+      const scoreVoice = (v: SpeechSynthesisVoice): number => {
+        const name = v.name.toLowerCase();
+        let score = 0;
+        if (v.lang.startsWith('en')) score += 10;
+        if (v.lang.startsWith('en-US')) score += 10;
+        if (name.includes('natural') || name.includes('online')) score += 50;
+        if (name.includes('neural')) score += 40;
+        if (name.includes('google')) score += 30;
+        if (name.includes('enhanced') || name.includes('premium')) score += 30;
+        if (name.includes('aria') || name.includes('jenny') || name.includes('guy')) score += 20;
+        if (name.includes('desktop') || name.includes('legacy')) score -= 20;
+        return score;
+      };
+
+      const sortedVoices = [...voices].sort((a, b) => scoreVoice(b) - scoreVoice(a));
+      if (sortedVoices.length > 0 && scoreVoice(sortedVoices[0]) > 0) {
+        utterance.voice = sortedVoices[0];
       }
     }
 

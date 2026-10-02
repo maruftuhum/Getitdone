@@ -9,19 +9,18 @@ import {
   Check, 
   Clock, 
   Plus, 
-  RefreshCw, 
+  RotateCcw, 
   CheckCircle2, 
-  Languages, 
   Edit3, 
   Trash2,
   Calendar,
-  AlertCircle
+  Zap,
+  Bot
 } from 'lucide-react';
 import { ActiveCallState, Task, CallType } from '../types';
 import { audioService } from '../services/audioService';
 import { voiceCallService } from '../services/voiceCallService';
 import { hapticService } from '../services/hapticService';
-
 import { askAssistant } from '../services/assistantService';
 import type { ActionResult } from '../shared/taskActions';
 
@@ -59,10 +58,6 @@ export const AICallModal: React.FC<AICallModalProps> = ({
   onEndCall,
   tasks,
   userName = 'there',
-  onCompleteTask,
-  onAddTask,
-  onUpdateTask,
-  onDeleteTask,
   voiceName = 'Puck',
 }) => {
   const [callDuration, setCallDuration] = useState(0);
@@ -71,10 +66,10 @@ export const AICallModal: React.FC<AICallModalProps> = ({
   const [isMuted, setIsMuted] = useState(false);
   const [briefingText, setBriefingText] = useState('');
   const [userSpeechInput, setUserSpeechInput] = useState('');
-  const [callStatusMessage, setCallStatusMessage] = useState('Connecting voice assistant...');
+  const [callStatusMessage, setCallStatusMessage] = useState('Connecting with Aria...');
   const [isPreloaded, setIsPreloaded] = useState(false);
   
-  // Interactive Gemini Call & Bangla Support States
+  // Interactive Call & Multi-language States
   const [callLanguage, setCallLanguage] = useState<'en-US' | 'bn-BD'>('en-US');
   const [conversationHistory, setConversationHistory] = useState<
     Array<{ role: 'user' | 'assistant'; content: string }>
@@ -166,7 +161,7 @@ export const AICallModal: React.FC<AICallModalProps> = ({
     };
   }, [callState]);
 
-  // PROACTIVE PRE-PROCESSING: Load & process speech BEFORE the user answers (while ringing)
+  // Pre-load what Aria will say before the user picks up
   useEffect(() => {
     if (callState === 'ringing') {
       setIsPreloaded(false);
@@ -200,7 +195,7 @@ export const AICallModal: React.FC<AICallModalProps> = ({
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      setCallStatusMessage('Voice recognition is not supported in this browser. Use the quick buttons below.');
+      setCallStatusMessage('Voice recognition is unavailable on this browser. Tap quick actions below.');
       return;
     }
 
@@ -222,8 +217,8 @@ export const AICallModal: React.FC<AICallModalProps> = ({
         setIsUserListening(true);
         setCallStatusMessage(
           callLanguage === 'bn-BD'
-            ? 'শুনছি... সরাসরি কথা বলুন'
-            : 'Listening... speak directly'
+            ? 'শুনছি... কথা বলুন'
+            : 'Listening... speak freely'
         );
       };
 
@@ -252,7 +247,7 @@ export const AICallModal: React.FC<AICallModalProps> = ({
           clearTimeout(silenceTimerRef.current);
         }
 
-        // When user pauses speaking for 1.2s, auto-send turn to Gemini!
+        // When user pauses speaking for 950ms, send turn smoothly
         if (combined.length > 0) {
           silenceTimerRef.current = setTimeout(() => {
             const textToSend = speechTranscriptRef.current.trim();
@@ -261,12 +256,12 @@ export const AICallModal: React.FC<AICallModalProps> = ({
               speechTranscriptRef.current = '';
               setCallStatusMessage(
                 callLanguage === 'bn-BD'
-                  ? 'প্রসেস হচ্ছে...'
-                  : 'Processing your instruction...'
+                  ? 'ভাবছি...'
+                  : 'Aria is thinking...'
               );
               handleConversationalVoiceTurn(textToSend);
             }
-          }, 1200);
+          }, 950);
         }
       };
 
@@ -286,8 +281,8 @@ export const AICallModal: React.FC<AICallModalProps> = ({
           speechTranscriptRef.current = '';
           setCallStatusMessage(
             callLanguage === 'bn-BD'
-              ? 'প্রসেস হচ্ছে...'
-              : 'Processing your instruction...'
+              ? 'ভাবছি...'
+              : 'Aria is thinking...'
           );
           handleConversationalVoiceTurn(pendingText);
           return;
@@ -302,7 +297,7 @@ export const AICallModal: React.FC<AICallModalProps> = ({
         ) {
           autoRestartTimerRef.current = setTimeout(() => {
             startAutoListening();
-          }, 250);
+          }, 200);
         }
       };
 
@@ -314,7 +309,7 @@ export const AICallModal: React.FC<AICallModalProps> = ({
     }
   };
 
-  // When user answers (connects): GID speaks immediately without delay!
+  // When user answers: Aria speaks immediately with warmth
   useEffect(() => {
     if (callState === 'connected') {
       playInstantBriefing();
@@ -323,7 +318,7 @@ export const AICallModal: React.FC<AICallModalProps> = ({
 
   const playInstantBriefing = async () => {
     stopListening();
-    setCallStatusMessage(callLanguage === 'bn-BD' ? 'কথা বলছি...' : 'Speaking...');
+    setCallStatusMessage(callLanguage === 'bn-BD' ? 'কথা বলছি...' : 'Aria is speaking...');
 
     let scriptToSpeak = briefingText;
     if (!scriptToSpeak) {
@@ -332,7 +327,7 @@ export const AICallModal: React.FC<AICallModalProps> = ({
         const timeoutPromise = new Promise<{ script: string }>((resolve) =>
           setTimeout(
             () => resolve({ script: voiceCallService.getInstantFallbackScript(tasks, userName) }),
-            450
+            400
           )
         );
         const result = await Promise.race([prepPromise, timeoutPromise]);
@@ -344,7 +339,6 @@ export const AICallModal: React.FC<AICallModalProps> = ({
       }
     }
 
-    // Set initial assistant message in conversation
     setConversationHistory([{ role: 'assistant', content: scriptToSpeak }]);
 
     await audioService.playPreloadedOrSpeak(
@@ -358,26 +352,26 @@ export const AICallModal: React.FC<AICallModalProps> = ({
         setIsAiSpeaking(false);
         setCallStatusMessage(
           callLanguage === 'bn-BD'
-            ? 'শুনছি... সরাসরি কথা বলুন'
-            : 'Listening... speak directly'
+            ? 'শুনছি... কথা বলুন'
+            : 'Listening... speak freely'
         );
         startAutoListening();
       }
     );
   };
 
-  // Toggle Mute / Interrupt AI Speech
+  // Toggle Mute / Barge-in to Interrupt Aria
   const toggleMuteOrInterrupt = () => {
     hapticService.lightTap();
 
-    // If AI is currently speaking, user tapping mic interrupts the AI (barge-in) and opens mic!
+    // If Aria is speaking, tapping mic interrupts her immediately and opens mic!
     if (isAiSpeaking) {
       audioService.stopSpeaking();
       setIsAiSpeaking(false);
       setIsMuted(false);
       isMutedRef.current = false;
       setUserSpeechInput('');
-      setCallStatusMessage(callLanguage === 'bn-BD' ? 'বলুন, শুনছি...' : 'Go ahead, listening...');
+      setCallStatusMessage(callLanguage === 'bn-BD' ? 'বলুন, শুনছি...' : "Go ahead, I'm listening...");
       startAutoListening();
       return;
     }
@@ -389,7 +383,7 @@ export const AICallModal: React.FC<AICallModalProps> = ({
       stopListening();
       setCallStatusMessage(
         callLanguage === 'bn-BD'
-          ? 'মাইক্রোফোন মিউট করা হয়েছে (আনমিউট করতে ট্যাপ করুন)'
+          ? 'মাইক্রোফোন মিউট করা হয়েছে'
           : 'Microphone muted (tap to unmute)'
       );
     } else {
@@ -399,7 +393,7 @@ export const AICallModal: React.FC<AICallModalProps> = ({
     }
   };
 
-  // Conversational Multi-turn AI Call: handles spoken instructions, modifying tasks, Bangla, etc.
+  // Conversational Multi-turn Voice Turn
   const handleConversationalVoiceTurn = async (spokenText: string) => {
     if (!spokenText.trim() || isProcessingTurn) return;
     setIsProcessingTurn(true);
@@ -419,7 +413,7 @@ export const AICallModal: React.FC<AICallModalProps> = ({
         const outcome = data.action ? onAction(data.action) : null;
         if (outcome && !outcome.ok) { data.reply = outcome.message; data.audioBase64 = null; }
         if (outcome?.ok) setActionNotice({ type: data.action.action === 'CREATE_TASK' ? 'create' : data.action.action === 'COMPLETE_TASK' ? 'complete' : data.action.action === 'DELETE_TASK' ? 'delete' : 'update', text: outcome.message });
-        const reply = data.reply || (callLanguage === 'bn-BD' ? 'আমি বিষয়টি নোট করেছি।' : 'I have noted that.');
+        const reply = data.reply || (callLanguage === 'bn-BD' ? 'ঠিক আছে, আমি খেয়াল রাখছি।' : "Got it, I've got you covered!");
         setBriefingText(reply);
         setConversationHistory((prev) => [...prev, { role: 'assistant', content: reply }]);
 
@@ -437,8 +431,8 @@ export const AICallModal: React.FC<AICallModalProps> = ({
               setIsAiSpeaking(false);
               setCallStatusMessage(
                 callLanguage === 'bn-BD'
-                  ? 'শুনছি... সরাসরি কথা বলুন'
-                  : 'Listening... speak directly'
+                  ? 'শুনছি... কথা বলুন'
+                  : 'Listening... speak freely'
               );
               startAutoListening();
             }
@@ -455,8 +449,8 @@ export const AICallModal: React.FC<AICallModalProps> = ({
               setIsAiSpeaking(false);
               setCallStatusMessage(
                 callLanguage === 'bn-BD'
-                  ? 'শুনছি... সরাসরি কথা বলুন'
-                  : 'Listening... speak directly'
+                  ? 'শুনছি... কথা বলুন'
+                  : 'Listening... speak freely'
               );
               startAutoListening();
             }
@@ -464,8 +458,8 @@ export const AICallModal: React.FC<AICallModalProps> = ({
         }
       }
     } catch (err) {
-      console.warn('Fallback to local call command parser:', err);
-      setCallStatusMessage('Please try that instruction again.');
+      console.warn('Fallback to local assistant turn:', err);
+      setCallStatusMessage("I'm right here. Could you say that again?");
       startAutoListening();
     } finally {
       setIsProcessingTurn(false);
@@ -489,34 +483,36 @@ export const AICallModal: React.FC<AICallModalProps> = ({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-xl animate-fade-in p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-2xl animate-fade-in p-4 select-none">
       {/* INCOMING RINGING SCREEN */}
       {callState === 'ringing' && (
-        <div className="w-full max-w-sm flex flex-col items-center justify-between min-h-[520px] py-10 px-6 text-white text-center">
+        <div className="w-full max-w-sm flex flex-col items-center justify-between min-h-[540px] py-10 px-6 text-white text-center">
           {/* Top Caller Information */}
           <div className="space-y-3">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-500/20 text-indigo-300 text-xs font-medium border border-indigo-500/30">
-              <Sparkles className="w-3.5 h-3.5" />
-              Incoming AI Briefing Call
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-gradient-to-r from-indigo-500/20 to-violet-500/20 text-indigo-300 text-xs font-medium border border-indigo-500/30 shadow-sm shadow-indigo-500/10">
+              <Sparkles className="w-3.5 h-3.5 text-indigo-400 animate-pulse" />
+              <span>Personal Chief of Staff</span>
             </span>
-            <h2 className="text-3xl font-bold tracking-tight text-white">Get It Done</h2>
-            <p className="text-sm text-slate-300 animate-pulse">Personal Assistant Calling...</p>
+            <div>
+              <h2 className="text-3xl font-extrabold tracking-tight text-white">Aria</h2>
+              <p className="text-xs text-indigo-200/80 font-medium mt-1">Get It Done Assistant</p>
+            </div>
 
             <div className="flex items-center justify-center pt-1">
               <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border transition-all ${
                 isPreloaded
-                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-sm shadow-emerald-500/20'
-                  : 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30 animate-pulse'
+                  ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                  : 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30 animate-pulse'
               }`}>
                 {isPreloaded ? (
                   <>
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Briefing Ready to Speak</span>
+                    <span>Briefing Ready</span>
                   </>
                 ) : (
                   <>
-                    <Sparkles className="w-3.5 h-3.5 animate-spin" />
-                    <span>Processing what to say...</span>
+                    <Zap className="w-3.5 h-3.5 text-amber-400 animate-bounce" />
+                    <span>Preparing your day...</span>
                   </>
                 )}
               </span>
@@ -524,27 +520,28 @@ export const AICallModal: React.FC<AICallModalProps> = ({
           </div>
 
           {/* Central Pulsing Avatar Ring */}
-          <div className="relative my-6">
-            <div className="absolute inset-0 rounded-full bg-indigo-500/20 animate-ping" />
-            <div className="absolute -inset-4 rounded-full bg-indigo-500/10 animate-pulse" />
-            <div className="relative w-28 h-28 rounded-full bg-gradient-to-tr from-indigo-600 to-violet-600 flex items-center justify-center shadow-2xl shadow-indigo-500/40 border-4 border-white/20">
-              <Phone className="w-12 h-12 text-white animate-bounce" />
+          <div className="relative my-8">
+            <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-indigo-500/30 to-violet-500/30 animate-ping duration-1000" />
+            <div className="absolute -inset-6 rounded-full bg-indigo-500/15 animate-pulse" />
+            <div className="relative w-32 h-32 rounded-full bg-gradient-to-tr from-indigo-600 via-indigo-500 to-violet-600 flex flex-col items-center justify-center shadow-2xl shadow-indigo-500/50 border-4 border-white/20">
+              <Bot className="w-12 h-12 text-white drop-shadow-md" />
+              <span className="text-[10px] font-bold tracking-widest text-indigo-200 mt-1 uppercase">Aria</span>
             </div>
           </div>
 
           {/* Incoming Details & Answer / Decline Actions */}
           <div className="w-full space-y-6">
-            <p className="text-xs text-slate-400">
-              {pendingCount} tasks queued for briefing
+            <p className="text-xs text-slate-400 font-medium">
+              {pendingCount === 0 ? 'Schedule is clear' : `${pendingCount} ${pendingCount === 1 ? 'task' : 'tasks'} to review with you`}
             </p>
 
-            <div className="flex items-center justify-around gap-6 pt-4">
+            <div className="flex items-center justify-around gap-6 pt-2">
               {/* Decline Button */}
               <div className="flex flex-col items-center gap-2">
                 <button
                   onClick={onDeclineCall}
-                  className="w-16 h-16 rounded-full bg-rose-600 hover:bg-rose-700 active:scale-95 text-white flex items-center justify-center shadow-lg shadow-rose-600/40 transition-all touch-manipulation min-h-[64px] min-w-[64px]"
-                  title="Decline Call"
+                  className="w-16 h-16 rounded-full bg-rose-600 hover:bg-rose-700 active:scale-95 text-white flex items-center justify-center shadow-xl shadow-rose-600/30 transition-all touch-manipulation"
+                  title="Decline"
                 >
                   <PhoneOff className="w-7 h-7" />
                 </button>
@@ -555,68 +552,73 @@ export const AICallModal: React.FC<AICallModalProps> = ({
               <div className="flex flex-col items-center gap-2">
                 <button
                   onClick={onAnswerCall}
-                  className="w-16 h-16 rounded-full bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-white flex items-center justify-center shadow-lg shadow-emerald-500/40 transition-all animate-pulse touch-manipulation min-h-[64px] min-w-[64px]"
-                  title="Answer Call"
+                  className="w-16 h-16 rounded-full bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-white flex items-center justify-center shadow-xl shadow-emerald-500/40 transition-all animate-pulse touch-manipulation"
+                  title="Answer"
                 >
                   <Phone className="w-7 h-7" />
                 </button>
-                <span className="text-xs font-medium text-emerald-400 font-semibold">Answer</span>
+                <span className="text-xs font-semibold text-emerald-400">Answer</span>
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* CONNECTED CALL SCREEN (Interactive Gemini Voice Call with Bangla & Actions) */}
+      {/* CONNECTED CALL SCREEN (Natural Conversational Assistant) */}
       {callState === 'connected' && (
-        <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl flex flex-col items-center justify-between min-h-[610px] text-white">
+        <div className="w-full max-w-md bg-slate-900/90 border border-slate-800 rounded-3xl p-6 shadow-2xl flex flex-col items-center justify-between min-h-[620px] text-white backdrop-blur-xl">
           {/* Header, Duration & Language Switcher */}
-          <div className="w-full flex items-center justify-between border-b border-slate-800 pb-3.5">
+          <div className="w-full flex items-center justify-between border-b border-slate-800 pb-3">
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-full bg-indigo-600/30 border border-indigo-500/40 flex items-center justify-center">
-                <Sparkles className="w-4 h-4 text-indigo-400" />
+              <div className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-indigo-500 to-violet-600 flex items-center justify-center shadow-md shadow-indigo-500/30">
+                <Bot className="w-5 h-5 text-white" />
               </div>
               <div className="text-left">
-                <h3 className="text-sm font-semibold text-white">Gemini Voice Assistant</h3>
-                <span className="text-[11px] text-emerald-400 font-mono flex items-center gap-1">
+                <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
+                  Aria
+                  <span className="text-[10px] font-normal px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                    Chief of Staff
+                  </span>
+                </h3>
+                <span className="text-[11px] text-emerald-400 font-mono flex items-center gap-1 mt-0.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                   Live Call · {formatTimer(callDuration)}
                 </span>
               </div>
             </div>
 
-            {/* Language Switcher (English / বাংলা) */}
-            <div className="flex items-center gap-1.5 bg-slate-800/80 p-1 rounded-xl border border-slate-700">
+            {/* Language Switcher */}
+            <div className="flex items-center gap-1 bg-slate-800/80 p-1 rounded-xl border border-slate-700/60">
               <button
                 type="button"
                 onClick={() => setCallLanguage('en-US')}
-                className={`px-2 py-1 rounded-lg text-xs font-semibold transition ${
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition ${
                   callLanguage === 'en-US'
                     ? 'bg-indigo-600 text-white shadow-sm'
                     : 'text-slate-400 hover:text-white'
                 }`}
-                title="Speak English"
+                title="English"
               >
                 EN
               </button>
               <button
                 type="button"
                 onClick={() => setCallLanguage('bn-BD')}
-                className={`px-2 py-1 rounded-lg text-xs font-semibold transition ${
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition ${
                   callLanguage === 'bn-BD'
                     ? 'bg-indigo-600 text-white shadow-sm'
                     : 'text-slate-400 hover:text-white'
                 }`}
-                title="বাংলায় কথা বলুন"
+                title="বাংলা"
               >
                 বাংলা
               </button>
             </div>
           </div>
 
-          {/* Action Notification Banner (when task is created/updated/deleted) */}
+          {/* Action Notification Toast */}
           {actionNotice && (
-            <div className="w-full mt-2 p-2 rounded-xl bg-indigo-950/70 border border-indigo-500/40 flex items-center gap-2 text-xs text-indigo-200 animate-in fade-in slide-in-from-top-2">
+            <div className="w-full mt-2 p-2.5 rounded-xl bg-indigo-950/80 border border-indigo-500/40 flex items-center gap-2 text-xs text-indigo-200 animate-in fade-in slide-in-from-top-2">
               {actionNotice.type === 'create' && <Plus className="w-4 h-4 text-emerald-400 shrink-0" />}
               {actionNotice.type === 'update' && <Edit3 className="w-4 h-4 text-amber-400 shrink-0" />}
               {actionNotice.type === 'complete' && <Check className="w-4 h-4 text-emerald-400 shrink-0" />}
@@ -625,31 +627,31 @@ export const AICallModal: React.FC<AICallModalProps> = ({
             </div>
           )}
 
-          {/* Central Voice Visualizer & Animated Waveform */}
-          <div className="flex flex-col items-center my-3 space-y-2.5">
-            <div className={`relative w-24 h-24 rounded-full flex items-center justify-center transition-all duration-300 ${
+          {/* Central Living Orb Visualizer */}
+          <div className="flex flex-col items-center my-4 space-y-3">
+            <div className={`relative w-28 h-28 rounded-full flex items-center justify-center transition-all duration-500 ${
               isAiSpeaking
-                ? 'bg-gradient-to-tr from-indigo-500 to-violet-500 shadow-xl shadow-indigo-500/50 scale-105 ring-4 ring-indigo-500/20'
+                ? 'bg-gradient-to-tr from-indigo-500 via-violet-500 to-indigo-600 shadow-2xl shadow-indigo-500/60 scale-105 ring-8 ring-indigo-500/20'
                 : isMuted
-                ? 'bg-rose-950/60 border border-rose-500/40 text-rose-300'
+                ? 'bg-slate-800 border-2 border-rose-500/40 text-rose-300'
                 : isUserListening
-                ? 'bg-emerald-500 shadow-xl shadow-emerald-500/40 scale-105 ring-4 ring-emerald-500/20'
+                ? 'bg-gradient-to-tr from-emerald-500 to-teal-500 shadow-2xl shadow-emerald-500/50 scale-105 ring-8 ring-emerald-500/20'
                 : 'bg-slate-800 border border-slate-700'
             }`}>
               {isAiSpeaking ? (
-                <Volume2 className="w-10 h-10 text-white animate-pulse" />
+                <Volume2 className="w-12 h-12 text-white animate-pulse" />
               ) : isMuted ? (
-                <MicOff className="w-10 h-10 text-rose-400" />
+                <MicOff className="w-11 h-11 text-rose-400" />
               ) : isUserListening ? (
-                <Mic className="w-10 h-10 text-white animate-pulse" />
+                <Mic className="w-12 h-12 text-white animate-pulse" />
               ) : (
-                <Sparkles className="w-9 h-9 text-slate-400" />
+                <Sparkles className="w-10 h-10 text-indigo-300 animate-spin" />
               )}
             </div>
 
-            {/* Audio Wave Bars */}
+            {/* Reactive Sound Bars */}
             <div className="flex items-center justify-center gap-1.5 h-6">
-              {[40, 70, 90, 60, 100, 75, 45, 80, 50].map((height, i) => (
+              {[35, 75, 95, 60, 100, 80, 50, 85, 45].map((height, i) => (
                 <span
                   key={i}
                   style={{
@@ -658,24 +660,24 @@ export const AICallModal: React.FC<AICallModalProps> = ({
                   }}
                   className={`w-1 rounded-full ${
                     isAiSpeaking
-                      ? 'bg-indigo-400'
+                      ? 'bg-indigo-400 shadow-sm shadow-indigo-400'
                       : isMuted
                       ? 'bg-slate-700'
                       : isUserListening
-                      ? 'bg-emerald-400'
+                      ? 'bg-emerald-400 shadow-sm shadow-emerald-400'
                       : 'bg-slate-700'
                   }`}
                 />
               ))}
             </div>
 
-            {/* Hands-Free Live Status Badge */}
+            {/* Hands-Free State Badge */}
             <div className="flex flex-col items-center gap-1">
-              <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold transition-all border ${
+              <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition-all border ${
                 isMuted
                   ? 'bg-rose-500/10 text-rose-300 border-rose-500/30'
                   : isAiSpeaking
-                  ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40'
+                  ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40 shadow-sm shadow-indigo-500/10'
                   : isProcessingTurn
                   ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 animate-pulse'
                   : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-sm shadow-emerald-500/20'
@@ -684,12 +686,12 @@ export const AICallModal: React.FC<AICallModalProps> = ({
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
                 )}
                 {isMuted
-                  ? 'Muted (Tap mic to talk)'
+                  ? 'Muted · Tap mic to speak'
                   : isAiSpeaking
-                  ? 'AI Speaking (Tap mic to interrupt)'
+                  ? 'Aria Speaking · Tap mic to interrupt'
                   : isProcessingTurn
                   ? 'Thinking...'
-                  : '🎙️ Hands-Free Live • Speak directly'}
+                  : '🎙️ Hands-Free Live · Speak naturally'}
               </span>
               <p className="text-[11px] font-mono text-slate-400 text-center px-4">
                 {callStatusMessage}
@@ -697,134 +699,126 @@ export const AICallModal: React.FC<AICallModalProps> = ({
             </div>
           </div>
 
-          {/* Live Spoken Dialogue Box */}
-          <div className="w-full bg-slate-950/70 border border-slate-800/80 rounded-2xl p-3.5 text-left my-1.5 max-h-36 overflow-y-auto space-y-2">
+          {/* Natural Dialogue Stream Box */}
+          <div className="w-full bg-slate-950/70 border border-slate-800/80 rounded-2xl p-4 text-left my-2 max-h-36 overflow-y-auto space-y-2">
             {userSpeechInput && (
-              <div className="p-2 rounded-xl bg-slate-800/60 border border-emerald-500/30 text-[11px] text-emerald-300 font-mono animate-in fade-in">
+              <div className="p-2 rounded-xl bg-slate-800/80 border border-emerald-500/30 text-xs text-emerald-300 font-mono animate-in fade-in">
                 🗣️ You: "{userSpeechInput}"
               </div>
             )}
-            <p className="text-xs text-slate-200 leading-relaxed font-sans">
-              "{briefingText || (callLanguage === 'bn-BD' ? 'কীভাবে সাহায্য করতে পারি বলুন...' : 'How can I help you today?')}"
+            <p className="text-sm text-slate-200 leading-relaxed font-sans font-medium">
+              "{briefingText || (callLanguage === 'bn-BD' ? 'কীভাবে সাহায্য করতে পারি বলুন...' : "How's your day going? How can I help?")}"
             </p>
           </div>
 
-          {/* Quick Spoken Instruction Chips (English & Bangla) */}
+          {/* Thought Suggestions */}
           <div className="w-full py-1">
             <div className="flex flex-wrap gap-1.5 justify-center">
               {callLanguage === 'bn-BD' ? (
                 <>
                   <button
                     onClick={() => handleQuickAction('আজকের প্রথম কাজ শেষ হয়েছে')}
-                    className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] text-slate-200 border border-slate-700 flex items-center gap-1 transition active:scale-95"
+                    className="px-3 py-1.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-xs text-slate-200 border border-slate-700 flex items-center gap-1.5 transition active:scale-95"
                   >
-                    <Check className="w-3 h-3 text-emerald-400" />
-                    কাজ শেষ (Done)
+                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    কাজ শেষ
                   </button>
                   <button
                     onClick={() => handleQuickAction('আজকে বিকেল ৫টায় বাজার করার টাস্ক অ্যাড করো')}
-                    className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] text-slate-200 border border-slate-700 flex items-center gap-1 transition active:scale-95"
+                    className="px-3 py-1.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-xs text-slate-200 border border-slate-700 flex items-center gap-1.5 transition active:scale-95"
                   >
-                    <Plus className="w-3 h-3 text-indigo-400" />
+                    <Plus className="w-3.5 h-3.5 text-indigo-400" />
                     টাস্ক যোগ করো
                   </button>
                   <button
-                    onClick={() => handleQuickAction('কালকে সকাল ১০টায় মিটিং শিডিউল করো')}
-                    className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] text-slate-200 border border-slate-700 flex items-center gap-1 transition active:scale-95"
-                  >
-                    <Calendar className="w-3 h-3 text-sky-400" />
-                    শিডিউল করো
-                  </button>
-                  <button
                     onClick={() => handleQuickAction('আজকে আমার আর কি কি কাজ বাকি আছে?')}
-                    className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] text-slate-200 border border-slate-700 flex items-center gap-1 transition active:scale-95"
+                    className="px-3 py-1.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-xs text-slate-200 border border-slate-700 flex items-center gap-1.5 transition active:scale-95"
                   >
-                    <Clock className="w-3 h-3 text-amber-400" />
+                    <Clock className="w-3.5 h-3.5 text-amber-400" />
                     বাকি কাজ কি?
                   </button>
                 </>
               ) : (
                 <>
                   <button
+                    onClick={() => handleQuickAction("What's on my schedule today?")}
+                    className="px-3 py-1.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-xs text-slate-200 border border-slate-700 flex items-center gap-1.5 transition active:scale-95"
+                  >
+                    <Clock className="w-3.5 h-3.5 text-amber-400" />
+                    What's on my schedule?
+                  </button>
+                  <button
                     onClick={() => handleQuickAction('Mark top task as completed')}
-                    className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] text-slate-200 border border-slate-700 flex items-center gap-1 transition active:scale-95"
+                    className="px-3 py-1.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-xs text-slate-200 border border-slate-700 flex items-center gap-1.5 transition active:scale-95"
                   >
-                    <Check className="w-3 h-3 text-emerald-400" />
-                    Done top task
+                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    Mark first task done
                   </button>
                   <button
-                    onClick={() => handleQuickAction('Add task buy groceries today at 5pm')}
-                    className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] text-slate-200 border border-slate-700 flex items-center gap-1 transition active:scale-95"
+                    onClick={() => handleQuickAction('Reschedule my next task to tomorrow')}
+                    className="px-3 py-1.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-xs text-slate-200 border border-slate-700 flex items-center gap-1.5 transition active:scale-95"
                   >
-                    <Plus className="w-3 h-3 text-indigo-400" />
-                    Add task
-                  </button>
-                  <button
-                    onClick={() => handleQuickAction('Reschedule meeting to tomorrow at 10am')}
-                    className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] text-slate-200 border border-slate-700 flex items-center gap-1 transition active:scale-95"
-                  >
-                    <Calendar className="w-3 h-3 text-sky-400" />
-                    Reschedule
-                  </button>
-                  <button
-                    onClick={() => handleQuickAction('What tasks are pending for today?')}
-                    className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] text-slate-200 border border-slate-700 flex items-center gap-1 transition active:scale-95"
-                  >
-                    <Clock className="w-3 h-3 text-amber-400" />
-                    What's left?
+                    <Calendar className="w-3.5 h-3.5 text-sky-400" />
+                    Push to tomorrow
                   </button>
                 </>
               )}
             </div>
           </div>
 
-          {/* Controls: Replay + Hands-Free Mic / Mute + End Call */}
+          {/* Controls: Replay / Repeat + Hands-Free Mic / Barge-In + Hang Up */}
           <div className="w-full pt-3 flex items-center justify-around border-t border-slate-800">
             {/* Repeat Briefing / Reply Button */}
-            <button
-              onClick={playInstantBriefing}
-              title="Repeat speech"
-              className="w-12 h-12 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition border border-slate-700"
-            >
-              <RefreshCw className="w-5 h-5" />
-            </button>
+            <div className="flex flex-col items-center gap-1">
+              <button
+                onClick={playInstantBriefing}
+                title="Repeat speech"
+                className="w-12 h-12 rounded-full bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-400 hover:text-white flex items-center justify-center transition border border-slate-700 shadow-sm"
+              >
+                <RotateCcw className="w-5 h-5" />
+              </button>
+              <span className="text-[10px] text-slate-400 font-medium">Repeat</span>
+            </div>
 
             {/* User Speech Mic Button (Direct Voice Active / Mute / Interrupt) */}
             <div className="flex flex-col items-center gap-1">
               <button
                 onClick={toggleMuteOrInterrupt}
-                className={`w-16 h-16 rounded-full flex items-center justify-center transition-all shadow-md touch-manipulation min-h-[64px] min-w-[64px] ${
+                className={`w-16 h-16 rounded-full flex items-center justify-center transition-all shadow-xl touch-manipulation min-h-[64px] min-w-[64px] ${
                   isMuted
                     ? 'bg-slate-800 border-2 border-rose-500/60 text-rose-400 hover:bg-rose-500/20'
                     : isAiSpeaking
-                    ? 'bg-indigo-600/70 border-2 border-indigo-400 text-white animate-pulse'
+                    ? 'bg-indigo-600 border-2 border-indigo-400 text-white animate-pulse shadow-indigo-600/50'
                     : isUserListening
-                    ? 'bg-emerald-500 text-white animate-pulse shadow-emerald-500/40 ring-4 ring-emerald-500/25 scale-105'
-                    : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-600/30'
+                    ? 'bg-emerald-500 text-white animate-pulse shadow-emerald-500/50 ring-4 ring-emerald-500/30 scale-105'
+                    : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-600/40'
                 }`}
                 title={
                   isMuted
                     ? 'Unmute microphone'
                     : isAiSpeaking
-                    ? 'Tap to interrupt AI'
+                    ? 'Tap to interrupt Aria'
                     : 'Tap to mute microphone'
                 }
               >
                 {isMuted ? <MicOff className="w-7 h-7" /> : <Mic className="w-7 h-7" />}
               </button>
-              <span className="text-[10px] text-slate-400 font-medium">
+              <span className="text-[11px] font-semibold text-slate-300">
                 {isMuted ? 'Muted' : isAiSpeaking ? 'Interrupt' : 'Direct Voice'}
               </span>
             </div>
 
             {/* End Call Hangup */}
-            <button
-              onClick={onEndCall}
-              className="w-12 h-12 rounded-full bg-rose-600 hover:bg-rose-700 active:scale-95 text-white flex items-center justify-center shadow-lg shadow-rose-600/40 transition-all touch-manipulation min-h-[48px] min-w-[48px]"
-              title="Hang Up"
-            >
-              <PhoneOff className="w-5 h-5" />
-            </button>
+            <div className="flex flex-col items-center gap-1">
+              <button
+                onClick={onEndCall}
+                className="w-12 h-12 rounded-full bg-rose-600 hover:bg-rose-700 active:scale-95 text-white flex items-center justify-center shadow-lg shadow-rose-600/40 transition-all touch-manipulation"
+                title="Hang Up"
+              >
+                <PhoneOff className="w-5 h-5" />
+              </button>
+              <span className="text-[10px] text-slate-400 font-medium">End Call</span>
+            </div>
           </div>
         </div>
       )}

@@ -23,16 +23,28 @@ class VoiceCallService {
     const todayTasks = pending.filter((t) => t.dueDate === todayIso);
     const urgentTasks = pending.filter((t) => t.priority === 'high');
 
+    const name = userName && userName !== 'there' ? userName : '';
+    const hour = new Date().getHours();
+    let timeGreeting = 'Hey there!';
+    if (hour < 12) timeGreeting = name ? `Good morning, ${name}!` : 'Good morning!';
+    else if (hour < 17) timeGreeting = name ? `Good afternoon, ${name}!` : 'Good afternoon!';
+    else if (hour < 21) timeGreeting = name ? `Good evening, ${name}!` : 'Good evening!';
+    else timeGreeting = name ? `Hey ${name}!` : 'Hey there!';
+
     if (todayTasks.length === 0) {
       if (pending.length === 0) {
-        return `Hello ${userName}! All your tasks are completed. You have a clean schedule today. Enjoy your day!`;
+        return `${timeGreeting} You're completely caught up with zero pending tasks. Everything's done! How can I help you today?`;
       }
-      return `Hello ${userName}! You have no tasks due today, and ${pending.length} upcoming tasks this week. What would you like to review?`;
+      return `${timeGreeting} You've got no tasks due today, and ${pending.length} upcoming items later on. What would you like to work on?`;
     }
 
     const topTask = urgentTasks[0] || todayTasks[0];
     const timeDetail = topTask.dueTime ? ` at ${topTask.dueTime}` : '';
-    return `Good morning ${userName}! You have ${todayTasks.length} ${todayTasks.length === 1 ? 'task' : 'tasks'} scheduled for today. Top priority is "${topTask.title}"${timeDetail}. Are you ready to get it done?`;
+    if (todayTasks.length === 1) {
+      return `${timeGreeting} You have one task scheduled for today: "${topTask.title}"${timeDetail}. What's the plan?`;
+    }
+
+    return `${timeGreeting} You have ${todayTasks.length} tasks lined up today. The main one is "${topTask.title}"${timeDetail}. What would you like to start with?`;
   }
 
   // Pre-process and pre-load what GID will say BEFORE the user answers or before the call rings

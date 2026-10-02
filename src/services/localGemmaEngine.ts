@@ -204,27 +204,72 @@ Instructions: Keep answers concise, helpful, and directly actionable for their s
     // 2. Bundled High-Performance On-Device Offline Engine (Zero download required)
     const input = userInput.trim().toLowerCase();
 
+    // Natural conversation & small talk
+    if (/^(hi|hello|hey|good morning|good afternoon|good evening|greetings)\b/i.test(input) || /হ্যালো|হাই|সালাম/.test(input)) {
+      const pendingCount = pendingTasks.length;
+      return {
+        reply: `Hey! Good to hear from you. You have ${pendingCount} ${pendingCount === 1 ? 'task' : 'tasks'} on your list right now. What can I help you take care of?`,
+        isNativeOnDevice: true,
+        engineUsed: 'Natural Assistant Engine',
+      };
+    }
+
+    if (/how are you|how('?s| is) it going|how r u|who are you|what('?s| is) your name/i.test(input) || /কেমন আছো|তোমার নাম কি/.test(input)) {
+      return {
+        reply: "I'm Aria, your personal assistant and chief of staff! I'm here to keep your schedule running smoothly and take care of your tasks. How are you feeling today?",
+        isNativeOnDevice: true,
+        engineUsed: 'Natural Assistant Engine',
+      };
+    }
+
+    if (/thank|thanks|great job|appreciate it/i.test(input) || /ধন্যবাদ/.test(input)) {
+      return {
+        reply: "You're very welcome! I'm always right here whenever you need me.",
+        isNativeOnDevice: true,
+        engineUsed: 'Natural Assistant Engine',
+      };
+    }
+
+    if (/stress|overwhelm|exhaust|tired|too much|help me/i.test(input)) {
+      return {
+        reply: "Take a deep breath — I've got your back. We don't have to tackle everything at once. Let's focus on just the single most important task right now, or push non-urgent items to tomorrow. What feels most critical?",
+        isNativeOnDevice: true,
+        engineUsed: 'Natural Assistant Engine',
+      };
+    }
+
     if (input.includes('tomorrow')) {
       const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
       const list = pendingTasks.filter(t => t.dueDate === localDate(tomorrow));
-      return { reply: list.length ? list.map(t => t.title + (t.dueTime ? ' at ' + t.dueTime : '')).join('\n') : 'No tasks are due tomorrow.', isNativeOnDevice: true, engineUsed: 'Local assistant' };
-    }
-    // B. Query: What's due today?
-    if (input.includes('today') || input.includes('what is due') || input.includes('schedule')) {
-      if (todayTasks.length === 0) {
+      if (!list.length) {
         return {
-          reply: "[Local Assistant] You have no pending tasks scheduled for today! Would you like to schedule something new?",
+          reply: "Your schedule for tomorrow is completely clear! A blank slate. Would you like to add anything?",
           isNativeOnDevice: true,
-          engineUsed: 'Bundled Local Engine (100% Offline)',
+          engineUsed: 'Natural Assistant Engine',
         };
       }
-      const list = todayTasks
-        .map((t, i) => `${i + 1}. "${t.title}" ${t.dueTime ? 'at ' + t.dueTime : ''} [${t.priority}]`)
-        .join('\n');
+      const summary = list.map(t => `${t.title}${t.dueTime ? ' at ' + t.dueTime : ''}`).join(', and ');
       return {
-        reply: `[Local Assistant] You have ${todayTasks.length} tasks scheduled for today:\n${list}\n\nLet me know which one you want to start or mark done!`,
+        reply: `Tomorrow you have ${list.length} ${list.length === 1 ? 'task' : 'tasks'} scheduled: ${summary}. Anything you want to adjust?`,
         isNativeOnDevice: true,
-        engineUsed: 'Bundled Local Engine (100% Offline)',
+        engineUsed: 'Natural Assistant Engine',
+      };
+    }
+
+    // B. Query: What's due today?
+    if (input.includes('today') || input.includes('what is due') || input.includes('schedule') || input.includes('agenda') || input.includes('what do i have')) {
+      if (todayTasks.length === 0) {
+        return {
+          reply: "You have no tasks scheduled for today! Your day is wide open. Want to plan something new, or enjoy the free time?",
+          isNativeOnDevice: true,
+          engineUsed: 'Natural Assistant Engine',
+        };
+      }
+      const summary = todayTasks.map(t => `${t.title}${t.dueTime ? ' at ' + t.dueTime : ''}`).join(', and ');
+      return {
+        reply: `Today you have ${todayTasks.length} ${todayTasks.length === 1 ? 'task' : 'tasks'}: ${summary}. What would you like to start with?`,
+        isNativeOnDevice: true,
+        engineUsed: 'Natural Assistant Engine',
       };
     }
 
@@ -232,18 +277,16 @@ Instructions: Keep answers concise, helpful, and directly actionable for their s
     if (input.includes('urgent') || input.includes('priority') || input.includes('important')) {
       if (urgentTasks.length === 0) {
         return {
-          reply: "[Local Assistant] Great news! You don't have any urgent or high-priority tasks flagged right now.",
+          reply: "Good news! You don't have any urgent or high-priority fires to put out right now. Everything is running smoothly.",
           isNativeOnDevice: true,
-          engineUsed: 'Bundled Local Engine (100% Offline)',
+          engineUsed: 'Natural Assistant Engine',
         };
       }
-      const list = urgentTasks
-        .map((t, i) => `${i + 1}. "${t.title}" (Due: ${t.dueDate} ${t.dueTime || ''})`)
-        .join('\n');
+      const top = urgentTasks[0];
       return {
-        reply: `[Local Assistant] Here are your high-priority items that need attention:\n${list}`,
+        reply: `Your highest priority item is "${top.title}"${top.dueTime ? ' at ' + top.dueTime : ''}. Let me know when you want to knock that out!`,
         isNativeOnDevice: true,
-        engineUsed: 'Bundled Local Engine (100% Offline)',
+        engineUsed: 'Natural Assistant Engine',
       };
     }
 
@@ -253,17 +296,17 @@ Instructions: Keep answers concise, helpful, and directly actionable for their s
       const total = tasks.length;
       const percent = total > 0 ? Math.round((completedCount / total) * 100) : 0;
       return {
-        reply: `[Local Assistant] Productivity Report:\n• Total tasks: ${total}\n• Completed: ${completedCount} (${percent}%)\n• Remaining: ${pendingTasks.length}\nKeep up the great work!`,
+        reply: `You've checked off ${completedCount} out of ${total} tasks so far, which is ${percent}% of your list. Great momentum! Keep going.`,
         isNativeOnDevice: true,
-        engineUsed: 'Bundled Local Engine (100% Offline)',
+        engineUsed: 'Natural Assistant Engine',
       };
     }
 
     // E. General Assistant Guidance
     return {
-      reply: `[Local Assistant] I am actively tracking your ${pendingTasks.length} pending tasks. You can tell me to "add doctor visit tomorrow at 3pm", "what is due today?", or "call me with my briefing"!`,
+      reply: `I'm here! I'm keeping track of all ${pendingTasks.length} of your tasks. Feel free to ask what's due, tell me to reschedule, mark something done, or add a new to-do.`,
       isNativeOnDevice: true,
-      engineUsed: 'Bundled Local Engine (100% Offline)',
+      engineUsed: 'Natural Assistant Engine',
     };
   }
 

@@ -15,8 +15,8 @@ export const BottomNav: React.FC<BottomNavProps> = ({
   const tabs = [
     { id: 'tasks', label: 'Tasks', icon: CheckSquare, badge: pendingCount > 0 ? pendingCount : null },
     { id: 'calendar', label: 'Calendar', icon: Calendar },
-    { id: 'call', label: 'AI Call', icon: PhoneCall, highlight: true },
-    { id: 'chat', label: 'Assistant', icon: MessageSquare },
+    { id: 'call', label: 'Assistant', icon: PhoneCall, highlight: true },
+    { id: 'chat', label: 'Chat', icon: MessageSquare },
     { id: 'settings', label: 'Settings', icon: SlidersHorizontal },
   ];
 

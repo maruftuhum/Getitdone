@@ -22,7 +22,7 @@ export const ChatAssistantView: React.FC<ChatAssistantViewProps> = ({
     {
       id: 'welcome',
       role: 'assistant',
-      content: "Hello! I'm your Get It Done personal AI companion. You can ask me what's due, ask me to schedule tasks, or ask me to call you with a morning briefing!",
+      content: "Hey there! I'm Aria, your executive assistant and chief of staff. How's your day going? Feel free to ask what's due, tell me to reschedule anything, or let me know what you want to add.",
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     },
   ]);
