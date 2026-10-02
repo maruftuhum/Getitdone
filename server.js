@@ -2,7 +2,7 @@
 import "dotenv/config";
 import express4 from "express";
 import fs from "node:fs";
-import path from "node:path";
+import path2 from "node:path";
 import { fileURLToPath } from "node:url";
 
 // server/app.ts
@@ -17,7 +17,8 @@ import { applicationDefault, getApps, initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
 import { readFileSync } from "node:fs";
-var config = JSON.parse(readFileSync(new URL("../firebase-applet-config.json", import.meta.url), "utf8"));
+import path from "node:path";
+var config = JSON.parse(readFileSync(path.join(process.cwd(), "firebase-applet-config.json"), "utf8"));
 function adminApp() {
   return getApps()[0] || initializeApp({ credential: applicationDefault(), projectId: process.env.FIREBASE_PROJECT_ID || config.projectId });
 }
@@ -163,17 +164,17 @@ function createAiRouter() {
       return { audioBase64: null, fallbackToSpeechSynthesis: true };
     }
   }
-  for (const [path2, schema] of Object.entries(routeSchemas)) {
-    router.post(path2, validate(schema), async (req, res) => {
+  for (const [path3, schema] of Object.entries(routeSchemas)) {
+    router.post(path3, validate(schema), async (req, res) => {
       try {
         const body = req.body;
         const today = zonedClock(/* @__PURE__ */ new Date(), body.timeZone).date;
         const tasks = body.tasks || body.tasksContext || [];
-        if (path2 === "/tts") {
+        if (path3 === "/tts") {
           res.json({ text: body.text, ...await speech(body.text, body.voice) });
           return;
         }
-        if (path2 === "/chat" || path2 === "/call-conversation") {
+        if (path3 === "/chat" || path3 === "/call-conversation") {
           if (!ai) {
             res.json({ offline: true, reply: "", action: null });
             return;
@@ -204,10 +205,10 @@ Use only real dates, times, priorities low/medium/high, and categories Personal/
               else reply = "Please specify an existing task. I could not validate that instruction.";
             } else reply = "Please specify the task and the change again. I could not validate that instruction.";
           }
-          res.json({ reply, action, ...path2 === "/call-conversation" ? await speech(reply, body.voice) : {} });
+          res.json({ reply, action, ...path3 === "/call-conversation" ? await speech(reply, body.voice) : {} });
           return;
         }
-        if (path2 === "/parse-task") {
+        if (path3 === "/parse-task") {
           if (!ai) {
             res.json({ offline: true });
             return;
@@ -229,7 +230,7 @@ Use only real dates, times, priorities low/medium/high, and categories Personal/
           } catch {
           }
         }
-        res.json({ script, taskCount: due.length, ...path2 === "/prepare-call" ? await speech(script, body.voice) : {} });
+        res.json({ script, taskCount: due.length, ...path3 === "/prepare-call" ? await speech(script, body.voice) : {} });
       } catch (error) {
         console.error("AI request failed:", error instanceof Error ? error.message : "unknown");
         res.status(502).json({ error: "The cloud assistant is unavailable. Try the local assistant." });
@@ -431,13 +432,13 @@ function createApp(verify) {
 }
 
 // server.ts
-var root = path.dirname(fileURLToPath(import.meta.url));
+var root = path2.dirname(fileURLToPath(import.meta.url));
 var app = createApp();
 var port = Number(process.env.PORT || 3e3);
-var hasDist = fs.existsSync(path.join(root, "dist/index.html"));
+var hasDist = fs.existsSync(path2.join(root, "dist/index.html"));
 if (process.env.NODE_ENV === "production" || hasDist) {
-  app.use(express4.static(path.join(root, "dist")));
-  app.get("*", (_req, res) => res.sendFile(path.join(root, "dist/index.html")));
+  app.use(express4.static(path2.join(root, "dist")));
+  app.get("*", (_req, res) => res.sendFile(path2.join(root, "dist/index.html")));
 } else {
   const { createServer } = await import("vite");
   const vite = await createServer({ server: { middlewareMode: true }, appType: "spa" });
