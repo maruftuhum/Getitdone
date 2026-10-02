@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import express from 'express';
 import { createHash, randomUUID } from 'node:crypto';
 import webpush from 'web-push';
 import { z } from 'zod';
@@ -23,7 +23,7 @@ function deviceId(uid: string, endpoint: string) { return createHash('sha256').u
 
 export function pushConfig() { return { available: ready(), publicKey: ready() ? process.env.VAPID_PUBLIC_KEY : null }; }
 export function createPushRouter() {
-  const router = Router();
+  const router = express.Router();
   router.use((_req, res, next) => { if (!ready()) { res.status(503).json({ error: 'Background reminders are not configured on this server.' }); return; } next(); });
   router.post('/register', validate(scheduleSchema.extend({ subscription: subscriptionSchema })), async (req, res) => {
     try {

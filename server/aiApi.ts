@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import express from 'express';
 import { GoogleGenAI } from '@google/genai';
 import { taskActionSchema, taskFields } from '../src/shared/taskActions';
 import { zonedClock } from '../src/shared/dates';
@@ -6,7 +6,7 @@ import { routeSchemas, validate } from './security';
 import type { Task } from '../src/types';
 
 export function createAiRouter() {
-  const router = Router();
+  const router = express.Router();
   const key = process.env.GEMINI_API_KEY;
   const ai = key ? new GoogleGenAI({ apiKey: key, httpOptions: { timeout: 18000 } }) : null;
   const textModel = process.env.GEMINI_TEXT_MODEL || 'gemini-3.1-flash-lite';

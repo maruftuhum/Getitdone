@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createApp } from './server/app';
@@ -8,7 +9,8 @@ import { startPushWorker } from './server/push';
 const root = path.dirname(fileURLToPath(import.meta.url));
 const app = createApp();
 const port = Number(process.env.PORT || 3000);
-if (process.env.NODE_ENV === 'production') {
+const hasDist = fs.existsSync(path.join(root, 'dist/index.html'));
+if (process.env.NODE_ENV === 'production' || hasDist) {
   app.use(express.static(path.join(root, 'dist')));
   app.get('*', (_req, res) => res.sendFile(path.join(root, 'dist/index.html')));
 } else {
