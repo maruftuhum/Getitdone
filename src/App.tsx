@@ -386,15 +386,17 @@ export default function App() {
         )}
       </main>
 
-      {/* Floating Messenger-Style Chat Head Bubble */}
-      <ChatHeadBubble
-        tasks={tasks}
-        onAction={onAction}
-        onTriggerCall={() => handleTriggerCall('Chat Head Call')}
-        latestWorkUpdate={latestWorkUpdate}
-        key={scope}
-        hybridMode={hybridMode}
-      />
+      {/* Floating Messenger-Style Chat Head Bubble (shown when not in a voice call) */}
+      {callState === 'idle' && (
+        <ChatHeadBubble
+          tasks={tasks}
+          onAction={onAction}
+          onTriggerCall={() => handleTriggerCall('Chat Head Call')}
+          latestWorkUpdate={latestWorkUpdate}
+          key={scope}
+          hybridMode={hybridMode}
+        />
+      )}
 
       {/* Full Simulated Phone Call Modal */}
       {callState !== 'idle' && (
