@@ -11,9 +11,14 @@
     "push:keys": "web-push generate-vapid-keys",
     "preview": "vite preview",
     "clean": "node -e \"for (const name of ['dist', 'server.js']) require('node:fs').rmSync(name, { recursive: true, force: true })\"",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "cap:sync": "cap sync android",
+    "cap:open": "cap open android",
+    "cap:build": "npm run build && cap sync android"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/core": "^8.5.2",
     "@google/genai": "^2.4.0",
     "@mlc-ai/web-llm": "^0.2.85",
     "@tailwindcss/vite": "^4.3.3",
@@ -22,29 +27,34 @@
     "esbuild": "^0.28.0",
     "express": "^4.21.2",
     "express-rate-limit": "^8.0.0",
-    "firebase-admin": "^14.5.0",
-    "web-push": "^3.6.7",
-    "zod": "^4.0.0",
     "firebase": "^12.19.0",
+    "firebase-admin": "^14.5.0",
     "gitnexus": "^1.6.12",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "tsx": "^4.21.0",
-    "vite": "^8.3.0"
+    "vite": "^8.3.0",
+    "web-push": "^3.6.7",
+    "zod": "^4.0.0"
   },
   "overrides": {
     "@grpc/grpc-js": "^1.14.5",
-    "gaxios": { "uuid": "^11.1.1" }
+    "gaxios": {
+      "uuid": "^11.1.1"
+    }
   },
-  "engines": { "node": ">=22.12.0" },
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.2",
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
-    "@types/web-push": "^3.6.4",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "@types/web-push": "^3.6.4",
     "autoprefixer": "^10.4.21",
     "fake-indexeddb": "^6.0.0",
     "tailwindcss": "^4.3.3",

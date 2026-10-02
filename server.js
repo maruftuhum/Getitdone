@@ -16,30 +16,16 @@ import { z as z2 } from "zod";
 import { applicationDefault, getApps, initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
-
-// firebase-applet-config.json
-var firebase_applet_config_default = {
-  projectId: "gen-lang-client-0218720308",
-  appId: "1:295995645268:web:ce8f04672442bcbfc53cc1",
-  apiKey: "AIzaSyCVxsbgko74sYnTh-bnSsYkWx_XRhxJJ1o",
-  authDomain: "gen-lang-client-0218720308.firebaseapp.com",
-  firestoreDatabaseId: "ai-studio-taskflowai-9d76148e-02d6-4827-b557-5a7fd6fcd191",
-  storageBucket: "gen-lang-client-0218720308.firebasestorage.app",
-  messagingSenderId: "295995645268",
-  measurementId: "",
-  oAuthClientId: "295995645268-02bbn1s7f2k8jskhj8l2ucp5bucbhr7s.apps.googleusercontent.com",
-  recaptchaSiteKey: ""
-};
-
-// server/firebaseAdmin.ts
+import { readFileSync } from "node:fs";
+var config = JSON.parse(readFileSync(new URL("../firebase-applet-config.json", import.meta.url), "utf8"));
 function adminApp() {
-  return getApps()[0] || initializeApp({ credential: applicationDefault(), projectId: process.env.FIREBASE_PROJECT_ID || firebase_applet_config_default.projectId });
+  return getApps()[0] || initializeApp({ credential: applicationDefault(), projectId: process.env.FIREBASE_PROJECT_ID || config.projectId });
 }
 async function verifyToken(token) {
   return (await getAuth(adminApp()).verifyIdToken(token, true)).uid;
 }
 function adminDatabase() {
-  return getFirestore(adminApp(), firebase_applet_config_default.firestoreDatabaseId || "(default)");
+  return getFirestore(adminApp(), config.firestoreDatabaseId || "(default)");
 }
 
 // src/shared/taskActions.ts
@@ -89,7 +75,7 @@ var taskFields = z.object({
   dueTime: timeSchema.nullable().optional(),
   location: z.string().trim().max(500).nullable().optional(),
   description: z.string().max(2e3).optional(),
-  category: z.enum(["Personal", "Work", "Urgent", "Health", "Errands"]),
+  category: z.string().trim().min(1).max(50),
   priority: z.enum(["low", "medium", "high"])
 });
 var taskSchema = taskFields.extend({
@@ -291,12 +277,18 @@ function validPushEndpoint(value) {
 var endpointSchema = z3.string().max(3e3).refine(validPushEndpoint, "Unsupported push provider");
 var subscriptionSchema = z3.object({ endpoint: endpointSchema, expirationTime: z3.number().nullable().optional(), keys: z3.object({ p256dh: z3.string().regex(/^[\w-]{80,150}$/), auth: z3.string().regex(/^[\w-]{20,30}$/) }) });
 var scheduleSchema = z3.object({ timeZone: timeZoneSchema, alarms: z3.array(alarmSchema).max(30), taskAlertsEnabled: z3.boolean() });
-var ready = () => process.env.ENABLE_BACKGROUND_REMINDERS === "true" && !!process.env.VAPID_PUBLIC_KEY && !!process.env.VAPID_PRIVATE_KEY && !!process.env.VAPID_SUBJECT;
+var DEFAULT_VAPID_PUBLIC = "BC2O4qO4EIUEC3oVr9S5-N3wcCs0L-wBsWjUk6x-MTM8ermVAgmSEWrwbzsrhNb0NgetOosq4Q2eAnomD3s6284";
+var DEFAULT_VAPID_PRIVATE = "SGIt3_h77nbvYogbpcg-V_PJojpgQ-_sklojlRr8gC4";
+var DEFAULT_VAPID_SUBJECT = "mailto:mhtahim@gmail.com";
+var vapidPublic = () => process.env.VAPID_PUBLIC_KEY || DEFAULT_VAPID_PUBLIC;
+var vapidPrivate = () => process.env.VAPID_PRIVATE_KEY || DEFAULT_VAPID_PRIVATE;
+var vapidSubject = () => process.env.VAPID_SUBJECT || DEFAULT_VAPID_SUBJECT;
+var ready = () => process.env.ENABLE_BACKGROUND_REMINDERS !== "false" && !!vapidPublic() && !!vapidPrivate() && !!vapidSubject();
 function deviceId(uid, endpoint) {
   return createHash("sha256").update(`${uid}:${endpoint}`).digest("hex");
 }
 function pushConfig() {
-  return { available: ready(), publicKey: ready() ? process.env.VAPID_PUBLIC_KEY : null };
+  return { available: ready(), publicKey: ready() ? vapidPublic() : null };
 }
 function createPushRouter() {
   const router = express2.Router();
@@ -347,7 +339,7 @@ function createPushRouter() {
 function startPushWorker() {
   if (!ready()) return () => {
   };
-  webpush.setVapidDetails(process.env.VAPID_SUBJECT, process.env.VAPID_PUBLIC_KEY, process.env.VAPID_PRIVATE_KEY);
+  webpush.setVapidDetails(vapidSubject(), vapidPublic(), vapidPrivate());
   let running = false;
   const tick = async () => {
     if (running) return;
