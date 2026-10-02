@@ -79,10 +79,11 @@ export function useTasks() {
     ];
     commit({ tasks, pending });
   };
-  const addTask = (fields: Omit<Task, 'id' | 'userId' | 'createdAt' | 'updatedAt' | 'completed'>) => {
+  const addTask = (fields: Omit<Task, 'id' | 'userId' | 'createdAt' | 'updatedAt' | 'completed'>): Task => {
     const now = new Date().toISOString();
     const task: Task = { ...fields, id: `task-${crypto.randomUUID()}`, userId: user?.uid || 'local-user', completed: false, createdAt: now, updatedAt: now };
     mutate(task.id, task);
+    return task;
   };
   const updateTask = (id: string, updates: Partial<Task>) => {
     const current = state.current.cache.tasks.find(t => t.id === id);

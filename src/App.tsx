@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { signInWithGoogle, logOut } from './services/firebase';
 import { localGemmaEngine } from './services/localGemmaEngine';
+import { setLastActionedTaskId } from './services/localTaskCommands';
 import { notificationService } from './services/notificationService';
 import { hapticService } from './services/hapticService';
 import { useTasks } from './hooks/useTasks';
@@ -52,12 +53,15 @@ export default function App() {
   const handleAddTask = (title: string, dueDate: string, dueTime?: string | null, priority: TaskPriority = 'medium', category: TaskCategory = 'General', location?: string | null, description = '') => {
     const parsed = taskFields.safeParse({ title, dueDate, dueTime: dueTime || null, priority, category, location: location || null, description });
     if (!parsed.success) { setNotice('Please enter a valid title, date, and time.'); return; }
-    store.addTask(parsed.data); hapticService.taskCreate();
+    const created = store.addTask(parsed.data);
+    hapticService.taskCreate();
+    if (created?.id) setLastActionedTaskId(created.id);
   };
   const handleUpdateTask = (id: string, updates: Partial<Task>) => {
     const current = tasks.find(t => t.id === id);
     if (!current || !taskFields.safeParse({ ...current, ...updates }).success) { setNotice('That task change is invalid.'); return; }
     store.updateTask(id, updates);
+    setLastActionedTaskId(id);
   };
   const handleCompleteTaskFromCall = (id: string) => {
     if (tasks.some(t => t.id === id && !t.completed)) { store.updateTask(id, { completed: true, completedAt: new Date().toISOString() }); hapticService.taskComplete(); }

@@ -21,6 +21,12 @@ export const routeSchemas: Record<string, z.ZodType> = {
 export function apiLimiter() { return rateLimit({ windowMs: 60000, limit: 30, standardHeaders: 'draft-8', legacyHeaders: false }); }
 export function requireAuth(verify = verifyToken) {
   return async (req: Request, res: Response, next: NextFunction) => {
+    const geminiKey = (req.headers['x-gemini-api-key'] as string | undefined)?.trim();
+    if (geminiKey && geminiKey.startsWith('AIza') && !req.path.startsWith('/push')) {
+      res.locals.uid = 'custom-key-user';
+      next();
+      return;
+    }
     const match = req.headers.authorization?.match(/^Bearer (\S+)$/);
     if (!match) { res.status(401).json({ error: 'Sign in to use cloud features.' }); return; }
     try { res.locals.uid = await verify(match[1]); next(); }

@@ -23,11 +23,11 @@ jobs:
           node-version: 22
           cache: 'npm'
 
-      - name: Set up Java Development Kit (JDK 17)
+      - name: Set up Java Development Kit (JDK 21)
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: '21'
 
       - name: Install Node Dependencies
         run: npm ci || npm install
@@ -58,3 +58,14 @@ jobs:
           path: output/GetItDone-app-debug.apk
           if-no-files-found: error
           retention-days: 30
+
+      - name: Create or Update GitHub Release with APK
+        uses: softprops/action-gh-release@v2
+        if: github.ref == 'refs/heads/main'
+        with:
+          tag_name: v1.0.0-apk
+          name: "Get It Done - Native Android APK (Latest)"
+          body: "Official installable native Android APK with full offline capabilities, Gemini Live voice calling, and push notifications."
+          files: output/GetItDone-app-debug.apk
+          token: ${{ secrets.GITHUB_TOKEN }}
+

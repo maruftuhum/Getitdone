@@ -72,6 +72,26 @@ export const CallScheduleSettings: React.FC<CallScheduleSettingsProps> = ({
     notificationService.getPermissionStatus()
   );
   const [previewingVoiceId, setPreviewingVoiceId] = useState<string | null>(null);
+  const [apiKeyInput, setApiKeyInput] = useState(() => {
+    try {
+      return localStorage.getItem('getitdone_gemini_api_key') || '';
+    } catch {
+      return '';
+    }
+  });
+  const [isApiKeySaved, setIsApiKeySaved] = useState(false);
+
+  const handleSaveApiKey = () => {
+    const trimmed = apiKeyInput.trim();
+    if (trimmed) {
+      localStorage.setItem('getitdone_gemini_api_key', trimmed);
+    } else {
+      localStorage.removeItem('getitdone_gemini_api_key');
+    }
+    setIsApiKeySaved(true);
+    hapticService.lightTap();
+    setTimeout(() => setIsApiKeySaved(false), 2500);
+  };
 
   const voiceOptions = [
     { id: 'Puck', label: 'Puck (Natural, Energetic)', isOffline: false },
@@ -147,7 +167,7 @@ export const CallScheduleSettings: React.FC<CallScheduleSettingsProps> = ({
         <p className="text-xs text-slate-500">Receive due-task and briefing notifications while the app is closed. Open a briefing notification to start the in-app call. Delivery depends on browser permissions, network access, and a running reminder server.</p>
         <button onClick={backgroundEnabled ? onDisableBackground : onEnableBackground} className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs">{backgroundEnabled ? 'Disable background alerts' : 'Enable background alerts'}</button>
       </div>
-      {/* 1. Android APK & App Installation Card */}
+      {/* 1. Android Native APK & App Installation Card */}
       <div className="bg-gradient-to-br from-indigo-900 via-indigo-950 to-slate-900 text-white rounded-3xl p-5 shadow-lg space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2.5">
@@ -155,60 +175,70 @@ export const CallScheduleSettings: React.FC<CallScheduleSettingsProps> = ({
               <Smartphone className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-sm font-bold">Android App & APK Installation</h3>
+              <h3 className="text-sm font-bold">Android Native App & APK Installation</h3>
               <p className="text-xs text-indigo-200">
-                Run natively on your Android device with offline support
+                Install the real native Android APK or add to home screen
               </p>
             </div>
           </div>
-          <button
-            onClick={() => setShowApkGuide(!showApkGuide)}
+          <a
+            href="https://github.com/maruftuhum/Getitdone/releases"
+            target="_blank"
+            rel="noopener noreferrer"
             className="text-xs text-indigo-300 hover:text-white underline"
           >
-            How it works
-          </button>
+            Releases ↗
+          </a>
         </div>
 
-        {isInstalled ? (
-          <div className="p-3 rounded-2xl bg-emerald-500/20 border border-emerald-500/30 flex items-center gap-2 text-xs text-emerald-300 font-medium">
-            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span>Installed as standalone mobile app on this device.</span>
-          </div>
-        ) : isInstallable ? (
-          <button
-            onClick={install}
-            className="w-full py-3 rounded-2xl bg-white text-indigo-950 font-bold text-xs flex items-center justify-center gap-2 hover:bg-indigo-50 transition active:scale-98 shadow-md min-h-[48px]"
+        {/* Primary Download: Real Compiled Android APK */}
+        <div className="space-y-2">
+          <a
+            href="https://github.com/maruftuhum/Getitdone/releases/latest/download/GetItDone-app-debug.apk"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-full py-3.5 rounded-2xl bg-indigo-500 hover:bg-indigo-600 text-white font-bold text-xs flex items-center justify-center gap-2 transition active:scale-98 shadow-md min-h-[48px]"
           >
-            <Download className="w-4 h-4 text-indigo-700" />
-            <span>Install App on Android (1-Tap WebAPK)</span>
-          </button>
-        ) : isIOS ? (
-          <button
-            onClick={() => setShowIosGuide(true)}
-            className="w-full py-3 rounded-2xl bg-white/20 text-white font-bold text-xs flex items-center justify-center gap-2 hover:bg-white/30 transition min-h-[48px]"
-          >
-            <span>Install on iPhone / Safari</span>
-          </button>
-        ) : (
-          <div className="p-3 rounded-2xl bg-white/10 text-xs text-indigo-100 space-y-1">
-            <p className="font-semibold">Install directly from Android Chrome:</p>
-            <p className="text-[11px] text-indigo-200">
-              Tap browser menu <strong>(⋮)</strong> &gt; <strong>Install app</strong> or <strong>Add to Home screen</strong>. Android will build and install the native WebAPK package with your app icon and full-screen mode!
-            </p>
-          </div>
-        )}
+            <Download className="w-4 h-4" />
+            <span>Download Native Android APK (GetItDone-app-debug.apk)</span>
+          </a>
 
-        {showApkGuide && (
-          <div className="p-4 rounded-2xl bg-white/10 text-xs text-indigo-100 space-y-2 text-left border border-white/10">
-            <h4 className="font-bold text-white flex items-center gap-1.5">
-              <ShieldCheck className="w-4 h-4 text-emerald-400" />
-              Android WebAPK Technology
-            </h4>
+          <div className="p-3 rounded-2xl bg-white/10 text-xs text-indigo-100 space-y-1">
+            <p className="font-semibold text-white flex items-center gap-1.5">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+              Real Native Android Application (.apk)
+            </p>
             <p className="text-[11px] text-indigo-200 leading-relaxed">
-              Installing from Chrome adds the app to your Android app drawer and gives it a full-screen window. Cached task management works offline. Enable background alerts separately to receive notifications while the app is closed.
+              Compiled with Java 21 &amp; Android SDK 36. Includes automatic microphone permissions, native alarms, background services, and offline caching. Download the .apk file and tap to install on any Android phone.
             </p>
           </div>
-        )}
+        </div>
+
+        {/* Alternative 1-Tap Browser WebAPK */}
+        <div className="pt-2 border-t border-white/10 flex items-center justify-between text-xs">
+          <span className="text-indigo-200 text-[11px]">Or install as lightweight web app:</span>
+          {isInstalled ? (
+            <span className="text-emerald-300 font-semibold flex items-center gap-1">
+              <CheckCircle2 className="w-3.5 h-3.5" /> Installed
+            </span>
+          ) : isInstallable ? (
+            <button
+              onClick={install}
+              className="text-xs text-white font-bold underline hover:text-indigo-200"
+            >
+              1-Tap Browser Install
+            </button>
+          ) : isIOS ? (
+            <button
+              onClick={() => setShowIosGuide(true)}
+              className="text-xs text-white font-bold underline hover:text-indigo-200"
+            >
+              iPhone Guide
+            </button>
+          ) : (
+            <span className="text-indigo-300 text-[11px]">Menu (⋮) &gt; Install App</span>
+          )}
+        </div>
 
         {showIosGuide && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
@@ -503,19 +533,19 @@ export const CallScheduleSettings: React.FC<CallScheduleSettingsProps> = ({
         </div>
       </div>
 
-      {/* 4. Hybrid AI Engine & Offline Rule Mode */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm space-y-3">
-        <div className="flex items-center justify-between">
+      {/* 4. AI Assistant Engine & Cloud / Local AI Mode */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm space-y-4">
+        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-xl bg-violet-50 dark:bg-violet-950 text-violet-600 dark:text-violet-400 flex items-center justify-center">
               <Sparkles className="w-4 h-4" />
             </div>
             <div>
               <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                Use cloud AI with offline fallback
+                AI Assistant Engine & Calling Mode
               </h3>
               <p className="text-xs text-slate-500">
-                Switch off to keep assistant inference and speech on this device
+                {hybridMode ? 'Cloud AI (Gemini Live API) with offline fallback' : 'Local AI Only mode enabled'}
               </p>
             </div>
           </div>
@@ -523,25 +553,72 @@ export const CallScheduleSettings: React.FC<CallScheduleSettingsProps> = ({
           <label className="relative inline-flex items-center cursor-pointer min-h-[44px]">
             <input
               type="checkbox"
-              checked={hybridMode}
-              onChange={(e) => onToggleHybridMode(e.target.checked)}
+              checked={!hybridMode}
+              onChange={(e) => onToggleHybridMode(!e.target.checked)}
               className="sr-only peer"
             />
-            <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-slate-600 peer-checked:bg-indigo-600"></div>
+            <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-slate-600 peer-checked:bg-amber-600"></div>
           </label>
         </div>
 
-        <p className="text-[11px] text-slate-500 leading-relaxed">
-          When offline or without an active internet connection, Get It Done automatically switches to on-device regex parsing and Web Speech synthesis so your schedule, alarms, and voice briefings never stop working.
-        </p>
+        <div className="flex items-center justify-between py-1">
+          <div>
+            <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 block">
+              Local AI Only Mode
+            </span>
+            <span className="text-[11px] text-slate-500">
+              When switched on, all voice calls and chat stay 100% on this device. When switched off, calls use Google Gemini Live via cloud API with automatic offline fallback.
+            </span>
+          </div>
+        </div>
+
+        {/* Gemini API Key Configuration */}
+        <div className="pt-3 border-t border-slate-100 dark:border-slate-800/60 space-y-2">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-semibold text-slate-800 dark:text-slate-200 block">
+              Gemini Live API Key (Google AI Studio)
+            </label>
+            <a
+              href="https://aistudio.google.com/app/apikey"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline"
+            >
+              Get Free API Key ↗
+            </a>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="password"
+              value={apiKeyInput}
+              onChange={(e) => setApiKeyInput(e.target.value)}
+              placeholder="Paste your AIza... Gemini API key"
+              className="flex-1 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+            <button
+              type="button"
+              onClick={handleSaveApiKey}
+              className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition shadow-sm ${
+                isApiKeySaved
+                  ? 'bg-emerald-600 text-white'
+                  : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+              }`}
+            >
+              {isApiKeySaved ? 'Saved ✓' : 'Save Key'}
+            </button>
+          </div>
+          <p className="text-[10px] text-slate-400">
+            Saved securely in your device's browser storage. Used for zero-latency, natural conversational Gemini 2.0 Flash voice calls.
+          </p>
+        </div>
 
         <div className="pt-2 border-t border-slate-100 dark:border-slate-800/60 flex items-center justify-between">
           <div>
             <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 block">
-              Optional on-device language model
+              Optional On-Device WebGPU Model
             </span>
             <span className="text-[11px] text-slate-500">
-              Download a supported model to run in your browser with WebGPU
+              Download Google Gemma 2B or SmolLM to run on your phone GPU via WebLLM
             </span>
           </div>
           <button

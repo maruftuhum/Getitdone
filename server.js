@@ -116,6 +116,12 @@ function apiLimiter() {
 }
 function requireAuth(verify = verifyToken) {
   return async (req, res, next) => {
+    const geminiKey = req.headers["x-gemini-api-key"]?.trim();
+    if (geminiKey && geminiKey.startsWith("AIza") && !req.path.startsWith("/push")) {
+      res.locals.uid = "custom-key-user";
+      next();
+      return;
+    }
     const match = req.headers.authorization?.match(/^Bearer (\S+)$/);
     if (!match) {
       res.status(401).json({ error: "Sign in to use cloud features." });
@@ -146,15 +152,20 @@ import express from "express";
 import { GoogleGenAI } from "@google/genai";
 function createAiRouter() {
   const router = express.Router();
-  const key = process.env.GEMINI_API_KEY;
-  const ai = key ? new GoogleGenAI({ apiKey: key, httpOptions: { timeout: 18e3 } }) : null;
   const textModel = process.env.GEMINI_TEXT_MODEL || "gemini-2.0-flash";
   const speechModel = process.env.GEMINI_TTS_MODEL || "gemini-2.5-flash-preview-tts";
-  async function text(contents, systemInstruction, json = false) {
+  function getAi(req) {
+    const clientKey = req.headers["x-gemini-api-key"]?.trim();
+    const key = clientKey || process.env.GEMINI_API_KEY;
+    if (!key) return null;
+    return new GoogleGenAI({ apiKey: key, httpOptions: { timeout: 18e3 } });
+  }
+  async function text(ai, contents, systemInstruction, json = false) {
+    if (!ai) return "";
     const response = await ai.models.generateContent({ model: textModel, contents, config: { systemInstruction, temperature: 0.2, ...json ? { responseMimeType: "application/json" } : {} } });
     return response.text || "";
   }
-  async function speech(content, voice2 = "Puck") {
+  async function speech(ai, content, voice2 = "Puck") {
     if (!ai || voice2 === "Device-Local") return { audioBase64: null, fallbackToSpeechSynthesis: true };
     try {
       const response = await ai.models.generateContent({ model: speechModel, contents: content, config: { responseModalities: ["AUDIO"], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice2 } } } } });
@@ -168,10 +179,11 @@ function createAiRouter() {
     router.post(path3, validate(schema), async (req, res) => {
       try {
         const body = req.body;
+        const ai = getAi(req);
         const today = zonedClock(/* @__PURE__ */ new Date(), body.timeZone).date;
         const tasks = body.tasks || body.tasksContext || [];
         if (path3 === "/tts") {
-          res.json({ text: body.text, ...await speech(body.text, body.voice) });
+          res.json({ text: body.text, ...await speech(ai, body.text, body.voice) });
           return;
         }
         if (path3 === "/chat" || path3 === "/call-conversation") {
@@ -194,7 +206,7 @@ CURRENT SCHEDULE & TASKS:
 ${JSON.stringify(tasks)}
 
 ACTION INSTRUCTIONS:
-If the user asks to add, complete, delete, or reschedule a task, confirm it warmly in spoken speech and append a fenced action block at the end:
+If the user asks to add, complete, delete, rename, edit, or reschedule a task, confirm it warmly in spoken speech and append a fenced action block at the end:
 \`\`\`action
 {"action":"CREATE_TASK","task":{"title":"title","dueDate":"YYYY-MM-DD","dueTime":null,"priority":"medium","category":"Personal","location":null}}
 \`\`\`
@@ -206,12 +218,13 @@ Or:
 \`\`\`action
 {"action":"DELETE_TASK","taskId":"exact-existing-id"}
 \`\`\`
-Or:
+Or (for editing title, date, time, priority, or category):
 \`\`\`action
-{"action":"UPDATE_TASK","taskId":"exact-existing-id","updates":{"dueDate":"YYYY-MM-DD","dueTime":"HH:mm"}}
+{"action":"UPDATE_TASK","taskId":"exact-existing-id","updates":{"title":"new title","dueDate":"YYYY-MM-DD","dueTime":"HH:mm","priority":"high"}}
 \`\`\`
+If the user refers to the last task or says "that", "it", or "change it to...", identify the target task and emit the UPDATE_TASK action with the requested fields.
 If multiple tasks match and you are not sure which one, ask naturally: "Did you mean [task A] or [task B]?"`;
-          const raw = await text(body.messages.map((m) => ({ role: m.role === "user" ? "user" : "model", parts: [{ text: m.content }] })), instruction);
+          const raw = await text(ai, body.messages.map((m) => ({ role: m.role === "user" ? "user" : "model", parts: [{ text: m.content }] })), instruction);
           const match = raw.match(/```action\s*([\s\S]*?)\s*```/);
           let action = null;
           let reply = raw.replace(/```action[\s\S]*?```/g, "").trim();
@@ -228,7 +241,7 @@ If multiple tasks match and you are not sure which one, ask naturally: "Did you 
               else reply = "I couldn't find that specific task on your list. Could you clarify which one you'd like to update?";
             } else reply = "I caught that, but could you tell me once more what change you'd like to make?";
           }
-          res.json({ reply, action, ...path3 === "/call-conversation" ? await speech(reply, body.voice) : {} });
+          res.json({ reply, action, ...path3 === "/call-conversation" ? await speech(ai, reply, body.voice) : {} });
           return;
         }
         if (path3 === "/parse-task") {
@@ -236,7 +249,7 @@ If multiple tasks match and you are not sure which one, ask naturally: "Did you 
             res.json({ offline: true });
             return;
           }
-          const raw = await text(`Extract the task from ${JSON.stringify(body.input)}. Today is ${today} in ${body.timeZone}. Return JSON with title, dueDate YYYY-MM-DD, dueTime HH:mm or null, location string or null, category Personal/Work/Urgent/Health/Errands, priority low/medium/high.`, void 0, true);
+          const raw = await text(ai, `Extract the task from ${JSON.stringify(body.input)}. Today is ${today} in ${body.timeZone}. Return JSON with title, dueDate YYYY-MM-DD, dueTime HH:mm or null, location string or null, category Personal/Work/Urgent/Health/Errands, priority low/medium/high.`, void 0, true);
           const parsed = taskFields.safeParse(JSON.parse(raw));
           if (!parsed.success) {
             res.status(422).json({ error: "Could not parse that task." });
@@ -251,7 +264,7 @@ If multiple tasks match and you are not sure which one, ask naturally: "Did you 
         let script = due.length === 0 ? `${greeting} You're all clear today with no urgent tasks. Would you like to plan anything new, or are you taking it easy?` : `${greeting} You have ${due.length} ${due.length === 1 ? "task" : "tasks"} on your radar today. Next up is ${due[0].title}${due[0].dueTime ? ` at ${due[0].dueTime}` : ""}. Ready to jump in?`;
         if (ai) {
           try {
-            script = (await text(`You are Aria, an executive assistant calling ${body.userName || "your client"}.
+            script = (await text(ai, `You are Aria, an executive assistant calling ${body.userName || "your client"}.
 Write a warm, spoken ${body.callType} briefing (30 to 45 words max, no markdown, no robot tone).
 Today is ${today} in ${body.timeZone}.
 Pending tasks for today: ${JSON.stringify(due)}.
@@ -259,7 +272,7 @@ Speak naturally, enthusiastically, and conversationally like a trusted personal 
           } catch {
           }
         }
-        res.json({ script, taskCount: due.length, ...path3 === "/prepare-call" ? await speech(script, body.voice) : {} });
+        res.json({ script, taskCount: due.length, ...path3 === "/prepare-call" ? await speech(ai, script, body.voice) : {} });
       } catch (error) {
         console.error("AI request failed:", error instanceof Error ? error.message : "unknown");
         res.status(502).json({ error: "The cloud assistant is unavailable. Try the local assistant." });

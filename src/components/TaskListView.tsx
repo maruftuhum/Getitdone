@@ -519,28 +519,36 @@ export const TaskListView: React.FC<TaskListViewProps> = ({
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-2">
                       <h4
-                        className={`text-sm font-semibold truncate ${
+                        onClick={() => setEditingTask(task)}
+                        className={`text-sm font-semibold truncate cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors ${
                           task.completed
                             ? 'line-through text-slate-400 dark:text-slate-500'
                             : 'text-slate-900 dark:text-white'
                         }`}
+                        title="Click to edit task"
                       >
                         {task.title}
                       </h4>
 
                       {/* Action buttons (Edit, Delete) */}
-                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                         <button
                           type="button"
-                          onClick={() => setEditingTask(task)}
-                          className="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingTask(task);
+                          }}
+                          className="p-1 rounded-lg text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
                           title="Edit Task"
                         >
                           <Edit3 className="w-3.5 h-3.5" />
                         </button>
                         <button
                           type="button"
-                          onClick={() => onDeleteTask(task.id)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDeleteTask(task.id);
+                          }}
                           className="p-1 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 transition"
                           title="Delete Task"
                         >
@@ -551,7 +559,11 @@ export const TaskListView: React.FC<TaskListViewProps> = ({
 
                     {/* Description */}
                     {task.description && (
-                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-2">
+                      <p 
+                        onClick={() => setEditingTask(task)}
+                        className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-2 cursor-pointer hover:text-slate-700 dark:hover:text-slate-300"
+                        title="Click to edit task"
+                      >
                         {task.description}
                       </p>
                     )}

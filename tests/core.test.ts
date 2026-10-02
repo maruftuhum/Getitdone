@@ -76,8 +76,41 @@ test('local commands create, complete, delete and reschedule specific tasks', ()
   assert.deepEqual(localTaskCommand('Can you remove the dentist appointment please', [other, task])?.action, { action: 'DELETE_TASK', taskId: 'target' });
   assert.equal(localTaskCommand('Reschedule Dentist appointment to tomorrow at 4pm', [other, task])?.action?.action, 'UPDATE_TASK');
   assert.equal(localTaskCommand('Move Dentist appointment to tomorrow', [other, task])?.action?.action, 'UPDATE_TASK');
+  assert.equal(localTaskCommand('Rename Dentist appointment to Doctor visit', [other, task])?.action?.action, 'UPDATE_TASK');
+  assert.equal(localTaskCommand('Make Dentist appointment urgent', [other, task])?.action?.action, 'UPDATE_TASK');
   assert.equal(localTaskCommand('Complete the task', [other, task])?.action, undefined);
   assert.equal(localTaskCommand('Delete Dentist appointment', [task, { ...task, id: 'duplicate' }])?.action, undefined);
+});
+test('once task added, it can also be edited contextually', () => {
+  const milkTask: Task = { id: 'milk-1', title: 'Buy milk', dueDate: '2026-10-02', dueTime: null, priority: 'medium', category: 'Personal', completed: false, createdAt: '', updatedAt: '', userId: '' };
+  assert.equal(localTaskCommand('Add Buy milk', [])?.action?.action, 'CREATE_TASK');
+  
+  // 1. Contextual time & date edit
+  const edited = localTaskCommand('Change that to tomorrow at 5pm', [milkTask]);
+  assert.equal(edited?.action?.action, 'UPDATE_TASK');
+  assert.equal(edited?.action?.taskId, 'milk-1');
+  assert.equal(edited?.action?.updates?.dueTime, '17:00');
+
+  // 2. Contextual title replacement
+  const titleChanged = localTaskCommand('Change that to buy organic almond milk', [milkTask]);
+  assert.equal(titleChanged?.action?.action, 'UPDATE_TASK');
+  assert.equal(titleChanged?.action?.updates?.title, 'Buy organic almond milk');
+
+  // 3. Compound title + time edit
+  const compound = localTaskCommand('Change that to buy fresh groceries tomorrow at 4pm', [milkTask]);
+  assert.equal(compound?.action?.action, 'UPDATE_TASK');
+  assert.equal(compound?.action?.updates?.title, 'Buy fresh groceries');
+  assert.equal(compound?.action?.updates?.dueTime, '16:00');
+
+  // 4. Contextual priority edit
+  const urgent = localTaskCommand('Make it urgent', [milkTask]);
+  assert.equal(urgent?.action?.action, 'UPDATE_TASK');
+  assert.equal(urgent?.action?.updates?.priority, 'high');
+
+  // 5. Explicit title rename
+  const renamed = localTaskCommand('Rename Buy milk to Buy organic milk', [milkTask]);
+  assert.equal(renamed?.action?.action, 'UPDATE_TASK');
+  assert.equal(renamed?.action?.updates?.title, 'Buy organic milk');
 });
 test('missed reminders are caught up, completed tasks excluded and events deduplicated', () => {
   const from = Date.parse('2026-10-02T02:59:00Z');
